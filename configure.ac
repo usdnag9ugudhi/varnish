@@ -919,6 +919,7 @@ AC_CONFIG_FILES([
     bin/varnishadm/Makefile
     bin/varnishd/Makefile
     bin/varnishlog/Makefile
+    bin/varnishlog-json/Makefile
     bin/varnishstat/Makefile
     bin/varnishtop/Makefile
     bin/varnishhist/Makefile
