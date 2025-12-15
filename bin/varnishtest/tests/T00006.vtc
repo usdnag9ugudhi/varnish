@@ -1,0 +1,54 @@
+varnishtest "SSL attribute conflicts"
+
+varnish v1 -errvcl {Setting of field 'ssl_sni' conflicts with field 'ssl_nosni'.} {
+	backend default {
+		.host = "${localhost}";
+		.port = "443";
+		.ssl = 1;
+		.ssl_nosni = 0;
+		.ssl_sni = 0;
+	}
+}
+
+varnish v1 -errvcl {Setting of field 'ssl_nosni' conflicts with field 'ssl_sni'.} {
+	backend default {
+		.host = "${localhost}";
+		.port = "443";
+		.ssl = 1;
+		.ssl_sni = 0;
+		.ssl_nosni = 0;
+	}
+}
+
+varnish v1 -errvcl {Setting of field 'ssl_noverify' conflicts with field 'ssl_verify_peer'.} {
+	backend default {
+		.host = "${localhost}";
+		.port = "443";
+		.ssl = 1;
+		.ssl_verify_peer = 0;
+		.ssl_noverify = 0;
+	}
+}
+
+varnish v1 -errvcl {Setting of field 'ssl_verify_peer' conflicts with field 'ssl_noverify'.} {
+	backend default {
+		.host = "${localhost}";
+		.port = "443";
+		.ssl = 1;
+		.ssl_noverify = 0;
+		.ssl_verify_peer = 0;
+	}
+}
+
+# This should succeed: equivalent values set (ssl_noverify=true <=> ssl_verify_peer=false)
+varnish v1 -vcl {
+	backend default {
+		.host = "${localhost}";
+		.port = "443";
+		.ssl = 1;
+		.ssl_noverify = 1;
+		.ssl_verify_peer = 0;
+		.ssl_sni = 1;
+		.ssl_nosni = 0;
+	}
+}

@@ -1,0 +1,44 @@
+varnishtest "Test ssl_verify_peer"
+
+# Test 1: ssl_verify_peer = false should succeed with self-signed cert
+server s1 {
+	tls_handshake
+	rxreq
+	txresp
+} -start
+
+varnish v1 -vcl {
+	backend default {
+		.host = "${s1_addr}";
+		.port = "${s1_port}";
+		.ssl = 1;
+		.ssl_verify_peer = 0;
+	}
+} -start
+
+client c1 {
+	txreq
+	rxresp
+	expect resp.status == 200
+} -run
+
+# Test 2: ssl_verify_peer = true should fail with self-signed cert
+server s2 {
+	tls_handshake
+	expect tls.failed == true
+} -start
+
+varnish v1 -vcl {
+	backend default {
+		.host = "${s2_addr}";
+		.port = "${s2_port}";
+		.ssl = 1;
+		.ssl_verify_peer = 1;
+	}
+}
+
+client c1 {
+	txreq -url "/foo"
+	rxresp
+	expect resp.status == 503
+} -run

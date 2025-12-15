@@ -281,7 +281,7 @@ vbe_dir_getfd(VRT_CTX, struct worker *wrk, VCL_BACKEND dir, struct backend *bp,
 	CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 
 	FIND_TMO(connect_timeout, tmod, bo, bp);
-	pfd = VCP_Get(bp->conn_pool, tmod, wrk, force_fresh, &err);
+	pfd = VCP_Get(bp->conn_pool, tmod, wrk, force_fresh, &err, bo->vsl);
 	if (pfd == NULL) {
 		Lck_Lock(bp->director->mtx);
 		VBE_Connect_Error(bp->vsc, err);

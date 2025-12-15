@@ -132,3 +132,20 @@ vcc_FieldsOk(struct vcc *tl, const struct fld_spec *fs)
 		}
 	}
 }
+
+void
+vcc_CheckConflict(struct vcc *tl, unsigned v, unsigned u,
+    struct token *t0, struct token *t1)
+{
+
+	if (v != (unsigned)-1 && v != u) {
+		AN(t1);
+		VSB_printf(tl->sb, "Setting of field ");
+		vcc_ErrToken(tl, t0);
+		VSB_printf(tl->sb, " conflicts with field ");
+		vcc_ErrToken(tl, t1);
+		VSB_printf(tl->sb, ".\n");
+		vcc_ErrWhere(tl, t0);
+		tl->err = 1;
+	}
+}

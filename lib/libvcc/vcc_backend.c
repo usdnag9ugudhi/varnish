@@ -389,6 +389,9 @@ vcc_ParseHostDef(struct vcc *tl, struct symbol *sym,
 	const struct token *t_authority = NULL;
 	const struct token *t_did = NULL;
 	const struct token *t_preamble = NULL;
+	const struct token *t_ssl = NULL;
+	struct token *t_sni = NULL;
+	struct token *t_verify_peer = NULL;
 	struct symbol *pb;
 	struct fld_spec *fs;
 	struct inifin *ifp;
@@ -401,6 +404,10 @@ vcc_ParseHostDef(struct vcc *tl, struct symbol *sym,
 	char *p, *pp;
 	unsigned u;
 	int l;
+	unsigned sslflags = 0;
+	int v_ssl = -1;
+	unsigned v_sni = -1;
+	unsigned v_verify_peer = -1;
 
 	if (tl->t->tok == ID &&
 	    (vcc_IdIs(tl->t, "none") || vcc_IdIs(tl->t, "None"))) {
@@ -442,6 +449,12 @@ vcc_ParseHostDef(struct vcc *tl, struct symbol *sym,
 	    "?authority",
 	    "?wait_timeout",
 	    "?wait_limit",
+	    "?ssl",
+	    "?ssl_sni",
+	    "?ssl_nosni",
+	    "?ssl_noverify",
+	    "?ssl_verify_peer",
+	    "?ssl_verify_host",
 	    NULL);
 
 	tl->fb = VSB_new_auto();
@@ -606,6 +619,76 @@ vcc_ParseHostDef(struct vcc *tl, struct symbol *sym,
 			ERRCHK(tl);
 			SkipToken(tl, ';');
 			Fb(tl, 0, "\t.backend_wait_limit = %u,\n", u);
+		} else if (vcc_IdIs(t_field, "ssl")) {
+			u = vcc_UintVal(tl);
+			ERRCHK(tl);
+			SkipToken(tl, ';');
+			if (u)
+				sslflags |= BSSL_F_ENABLE;
+			else
+				sslflags &= ~BSSL_F_ENABLE;
+			t_ssl = t_field;
+			v_ssl = !!u;
+		} else if (vcc_IdIs(t_field, "ssl_nosni")) {
+			u = vcc_UintVal(tl);
+			ERRCHK(tl);
+			vcc_CheckConflict(tl, v_sni, !u,
+			    TRUST_ME(t_field), t_sni);
+			ERRCHK(tl);
+			v_sni = !u;
+			t_sni = TRUST_ME(t_field);
+			if (u)
+				sslflags |= BSSL_F_NOSNI;
+			else
+				sslflags &= ~BSSL_F_NOSNI;
+			SkipToken(tl, ';');
+		} else if (vcc_IdIs(t_field, "ssl_sni")) {
+			u = !!vcc_UintVal(tl);
+			ERRCHK(tl);
+			vcc_CheckConflict(tl, v_sni, u,
+			    TRUST_ME(t_field), t_sni);
+			ERRCHK(tl);
+			v_sni = u;
+			t_sni = TRUST_ME(t_field);
+			if (u)
+				sslflags &= ~BSSL_F_NOSNI;
+			else
+				sslflags |= BSSL_F_NOSNI;
+			SkipToken(tl, ';');
+		} else if (vcc_IdIs(t_field, "ssl_noverify")) {
+			u = vcc_UintVal(tl);
+			ERRCHK(tl);
+			vcc_CheckConflict(tl, v_verify_peer, !u,
+			    TRUST_ME(t_field), t_verify_peer);
+			ERRCHK(tl);
+			v_verify_peer = !u;
+			t_verify_peer = TRUST_ME(t_field);
+			if (u)
+				sslflags |= BSSL_F_NOVERIFY;
+			else
+				sslflags &= ~BSSL_F_NOVERIFY;
+			SkipToken(tl, ';');
+		} else if (vcc_IdIs(t_field, "ssl_verify_peer")) {
+			u = !!vcc_UintVal(tl);
+			ERRCHK(tl);
+			vcc_CheckConflict(tl, v_verify_peer, u,
+			    TRUST_ME(t_field), t_verify_peer);
+			ERRCHK(tl);
+			v_verify_peer = u;
+			t_verify_peer = TRUST_ME(t_field);
+			if (u)
+				sslflags &= ~BSSL_F_NOVERIFY;
+			else
+				sslflags |= BSSL_F_NOVERIFY;
+			SkipToken(tl, ';');
+		} else if (vcc_IdIs(t_field, "ssl_verify_host")) {
+			u = vcc_UintVal(tl);
+			ERRCHK(tl);
+			SkipToken(tl, ';');
+			if (u)
+				sslflags |= BSSL_F_VERIFY_HOST;
+			else
+				sslflags &= ~BSSL_F_VERIFY_HOST;
 		} else {
 			ErrInternal(tl);
 			VSB_destroy(&tl->fb);
@@ -642,6 +725,22 @@ vcc_ParseHostDef(struct vcc *tl, struct symbol *sym,
 		return;
 	}
 
+	if ((sslflags & BSSL_F_ENABLE) && t_path != NULL) {
+		VSB_cat(tl->sb, ".ssl can not be used with .path.\n");
+		vcc_ErrWhere(tl, t_ssl);
+		return;
+	}
+
+	/* sslflags = 0 unless BSSL_F_ENABLE */
+	if (!(sslflags & BSSL_F_ENABLE)) {
+		if (v_ssl == 0 && sslflags != 0) {
+			VSB_cat(tl->sb, "ssl_* options can not be used"
+			    " without .ssl enabled\n");
+			vcc_ErrWhere(tl, t_ssl);
+		}
+		sslflags = 0;
+	}
+
 	if (via != NULL)
 		AZ(via->extra);
 
@@ -663,6 +762,20 @@ vcc_ParseHostDef(struct vcc *tl, struct symbol *sym,
 
 	if (t_preamble != NULL)
 		VSB_printf(vsb1, "\t.preamble = %s,\n", t_preamble->dec);
+
+	VSB_printf(vsb1, "\t.sslflags = %u,\n", sslflags);
+
+	/* Emit hosthdr to endpoint for TLS SNI */
+	if (sslflags & BSSL_F_ENABLE) {
+		VSB_cat(vsb1, "\t.hosthdr = ");
+		if (t_hosthdr != NULL)
+			VSB_quote(vsb1, t_hosthdr->dec, -1, VSB_QUOTE_CSTR);
+		else if (t_host != NULL)
+			VSB_quote(vsb1, t_host->dec, -1, VSB_QUOTE_CSTR);
+		else
+			VSB_cat(vsb1, "\"0.0.0.0\"");
+		VSB_cat(vsb1, ",\n");
+	}
 
 	VSB_cat(vsb1, "};\n");
 	AZ(VSB_finish(vsb1));

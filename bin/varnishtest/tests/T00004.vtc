@@ -1,0 +1,25 @@
+varnishtest "Check error is received when SSL connection fails"
+
+# Connect with SSL to a non-SSL server - should fail
+server s1 {
+	# Server expects plain HTTP but gets TLS ClientHello
+	# Just close the connection
+	close
+	accept
+} -start
+
+varnish v1 -vcl {
+	backend foo {
+		.host = "${s1_addr}";
+		.port = "${s1_port}";
+		.ssl = 1;
+		.ssl_verify_peer = 0;
+		.connect_timeout = 1s;
+	}
+} -start
+
+client c1 {
+	txreq
+	rxresp
+	expect resp.status == 503
+} -run

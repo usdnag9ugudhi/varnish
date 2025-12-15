@@ -327,6 +327,8 @@ void vcc_ParseBackend(struct vcc *tl);
 struct fld_spec * vcc_FldSpec(struct vcc *tl, const char *first, ...);
 void vcc_IsField(struct vcc *tl, const struct token **t, struct fld_spec *fs);
 void vcc_FieldsOk(struct vcc *tl, const struct fld_spec *fs);
+void vcc_CheckConflict(struct vcc *tl, unsigned v, unsigned u,
+    struct token *t0, struct token *t1);
 
 /* vcc_compile.c */
 struct inifin *New_IniFin(struct vcc *);

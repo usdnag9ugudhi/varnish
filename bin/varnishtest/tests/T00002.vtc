@@ -1,0 +1,32 @@
+varnishtest "Test TLS Backend Probing"
+
+barrier b1 cond 2
+
+server s1 {
+	loop 8 {
+		tls_handshake
+		rxreq
+		expect req.url == "/"
+		txresp -hdr "Bar: foo" -body "foobar"
+		accept
+	}
+	barrier b1 sync
+} -start
+
+varnish v1 -vcl {
+	backend foo {
+		.host = "${s1_addr}";
+		.port = "${s1_port}";
+		.ssl = 1;
+		.ssl_verify_peer = 0;
+		.probe = {
+			.interval = 0.1s;
+			.initial = 0;
+		}
+	}
+} -start
+
+barrier b1 sync
+
+varnish v1 -expect VBE.vcl1.foo.happy >= 0
+varnish v1 -cliexpect "H{8}" "backend.list -p"

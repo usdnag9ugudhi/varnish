@@ -1,0 +1,22 @@
+varnishtest "EOF beresp body delivery over SSL"
+
+server s1 {
+	tls_handshake
+	rxreq
+	txresp -hdr "connection: close" -nolen -body "hello"
+} -start
+
+varnish v1 -vcl {
+	backend default {
+		.host = "${s1_addr}";
+		.port = "${s1_port}";
+		.ssl = 1;
+		.ssl_verify_peer = 0;
+	}
+} -start
+
+client c1 {
+	txreq
+	rxresp
+	expect resp.body == "hello"
+} -run

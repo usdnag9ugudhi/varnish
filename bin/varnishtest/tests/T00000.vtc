@@ -1,0 +1,22 @@
+varnishtest "Basic SSL backend definition"
+
+server s1 {
+	tls_handshake
+	rxreq
+	txresp
+} -start
+
+varnish v1 -vcl {
+	backend default {
+		.host = "${s1_addr}";
+		.port = "${s1_port}";
+		.ssl = 1;
+		.ssl_verify_peer = 0;
+	}
+} -start
+
+client c1 {
+	txreq
+	rxresp
+	expect resp.status == 200
+} -run

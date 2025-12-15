@@ -48,7 +48,7 @@
 
 #define VRT_MAJOR_VERSION	22U
 
-#define VRT_MINOR_VERSION	0U
+#define VRT_MINOR_VERSION	1U
 
 /***********************************************************************
  * Major and minor VRT API versions.
@@ -112,6 +112,10 @@
  *	VRT_l_req_filters() added
  *	VRT_r_bereq_filters() added
  *	VRT_l_bereq_filters() added
+ * 21.0
+ *	struct vrt_endpoint.sslflags added
+ *	struct vrt_endpoint.hosthdr added (SNI hostname for TLS)
+ *	BSSL_F_* flags added for backend TLS configuration
  * 20.1 (2024-11-08 7.6.1)
  *	VDI_EVENT_SICK added to enum vcl_event_e
  * 20.0 (2024-09-13)
@@ -646,6 +650,12 @@ void VRT_memmove(void *dst, const void *src, unsigned len);
  * One of those things...
  */
 
+/* Backend SSL flags */
+#define BSSL_F_ENABLE		(1 << 0)
+#define BSSL_F_NOSNI		(1 << 1)
+#define BSSL_F_NOVERIFY		(1 << 2)
+#define BSSL_F_VERIFY_HOST	(1 << 3)
+
 struct vrt_endpoint {
 	unsigned			magic;
 #define VRT_ENDPOINT_MAGIC		0xcc419347
@@ -653,6 +663,8 @@ struct vrt_endpoint {
 	VCL_IP				ipv6;
 	const char			*uds_path;
 	const struct vrt_blob		*preamble;
+	unsigned			sslflags;
+	const char			*hosthdr;
 };
 
 #define VRT_BACKEND_FIELDS(rigid)				\

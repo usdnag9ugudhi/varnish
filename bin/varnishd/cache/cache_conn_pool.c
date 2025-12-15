@@ -46,7 +46,9 @@
 
 #include "cache_conn_pool.h"
 #include "cache_conn_oper.h"
+#include "cache_conn_pool_ssl.h"
 #include "cache_pool.h"
+#include "../tls/cache_tls.h"
 
 #include "VSC_vcp.h"
 
@@ -70,19 +72,26 @@ struct pfd {
 
 	vtim_mono		created;
 	uint64_t		reused;
+
+	struct vtls_sess	*tls;
 };
 
 /*--------------------------------------------------------------------
  */
 
-typedef int cp_open_f(const struct conn_pool *, vtim_dur tmo, VCL_IP *ap);
+typedef int cp_open_f(const struct conn_pool *, vtim_dur tmo, VCL_IP *ap,
+    struct vsl_log *vsl, struct vtls_sess **ptsp);
 typedef void cp_close_f(struct pfd *);
+typedef void cp_begin_f(struct pfd *, struct vsl_log *);
+typedef void cp_end_f(struct pfd *);
 typedef const struct vco *cp_oper_f(struct pfd *, void **);
 typedef void cp_name_f(const struct pfd *, char *, unsigned, char *, unsigned);
 
 struct cp_methods {
 	cp_open_f				*open;
 	cp_close_f				*close;
+	cp_begin_f				*begin;
+	cp_end_f				*end;
 	cp_oper_f				*oper;
 	cp_name_f				*local_name;
 	cp_name_f				*remote_name;
@@ -419,11 +428,12 @@ VCP_Recycle(const struct worker *wrk, struct pfd **pfdp)
 }
 
 /*--------------------------------------------------------------------
- * Open a new connection from pool.
+ * Open a new connection from pool (internal, with TLS support).
  */
 
-int
-VCP_Open(struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap, int *err)
+static int
+vcp_open(struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap, int *err,
+    struct vsl_log *vsl, struct vtls_sess **ptsp)
 {
 	int r;
 	vtim_mono h;
@@ -451,7 +461,7 @@ VCP_Open(struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap, int *err)
 	}
 
 	*err = errno = 0;
-	r = cp->methods->open(cp, tmo, ap);
+	r = cp->methods->open(cp, tmo, ap, vsl, ptsp);
 
 	if (r >= 0 && errno == 0 && cp->endpoint->preamble != NULL &&
 	     cp->endpoint->preamble->len > 0) {
@@ -505,6 +515,17 @@ VCP_Open(struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap, int *err)
 }
 
 /*--------------------------------------------------------------------
+ * Open a new connection from pool (public API for probes).
+ * This wrapper maintains the old API without TLS support.
+ */
+
+int
+VCP_Open(struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap, int *err)
+{
+	return (vcp_open(cp, tmo, ap, err, NULL, NULL));
+}
+
+/*--------------------------------------------------------------------
  * Close a connection.
  */
 
@@ -543,7 +564,7 @@ VCP_Close(struct pfd **pfdp)
 
 struct pfd *
 VCP_Get(struct conn_pool *cp, vtim_dur tmo, struct worker *wrk,
-    unsigned force_fresh, int *err)
+    unsigned force_fresh, int *err, struct vsl_log *vsl)
 {
 	struct pfd *pfd;
 
@@ -571,15 +592,18 @@ VCP_Get(struct conn_pool *cp, vtim_dur tmo, struct worker *wrk,
 	cp->n_used++;			// Opening mostly works
 	Lck_Unlock(&cp->mtx);
 
-	if (pfd != NULL)
+	if (pfd != NULL) {
+		if (pfd->tls != NULL && cp->methods->begin != NULL)
+			cp->methods->begin(pfd, vsl);
 		return (pfd);
+	}
 
 	ALLOC_OBJ(pfd, PFD_MAGIC);
 	AN(pfd);
 	INIT_OBJ(pfd->waited, WAITED_MAGIC);
 	pfd->state = PFD_STATE_USED;
 	pfd->conn_pool = cp;
-	pfd->fd = VCP_Open(cp, tmo, &pfd->addr, err);
+	pfd->fd = vcp_open(cp, tmo, &pfd->addr, err, vsl, &pfd->tls);
 	if (pfd->fd < 0) {
 		FREE_OBJ(pfd);
 		Lck_Lock(&cp->mtx);
@@ -714,10 +738,14 @@ tmo2msec(vtim_dur tmo)
 }
 
 static int v_matchproto_(cp_open_f)
-vtp_open(const struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap)
+vtp_open(const struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap,
+    struct vsl_log *vsl, struct vtls_sess **ptsp)
 {
 	int s;
 	int msec;
+
+	(void)vsl;
+	(void)ptsp;
 
 	CHECK_OBJ_NOTNULL(cp, CONN_POOL_MAGIC);
 
@@ -777,10 +805,14 @@ static const struct cp_methods vtp_methods = {
  */
 
 static int v_matchproto_(cp_open_f)
-vus_open(const struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap)
+vus_open(const struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap,
+    struct vsl_log *vsl, struct vtls_sess **ptsp)
 {
 	int s;
 	int msec;
+
+	(void)vsl;
+	(void)ptsp;
 
 	CHECK_OBJ_NOTNULL(cp, CONN_POOL_MAGIC);
 	AN(cp->endpoint->uds_path);
@@ -807,6 +839,102 @@ static const struct cp_methods vus_methods = {
 	.close = vtp_close,
 	.local_name = vus_name,
 	.remote_name = vus_name,
+};
+
+/*--------------------------------------------------------------------
+ * Backend SSL/TLS methods
+ */
+
+static int v_matchproto_(cp_open_f)
+vtp_bssl_open(const struct conn_pool *cp, vtim_dur tmo, VCL_IP *ap,
+    struct vsl_log *vsl, struct vtls_sess **ptsp)
+{
+	struct vrt_endpoint *vep;
+	struct vtls_sess *tsp;
+	int s;
+	int msec;
+	double t_start;
+
+	CHECK_OBJ_NOTNULL(cp, CONN_POOL_MAGIC);
+	vep = cp->endpoint;
+	CHECK_OBJ_NOTNULL(vep, VRT_ENDPOINT_MAGIC);
+
+	AN(vep->sslflags & BSSL_F_ENABLE);
+	AN(vep->hosthdr);
+	if (ptsp != NULL)
+		AZ(*ptsp);
+
+	t_start = VTIM_real();
+
+	msec = tmo2msec(tmo);
+	if (cache_param->prefer_ipv6 &&
+	    (s = VTCP_connect(vep->ipv6, msec)) >= 0)
+		*ap = vep->ipv6;
+	else if ((s = VTCP_connect(vep->ipv4, msec)) >= 0)
+		*ap = vep->ipv4;
+	else if (!cache_param->prefer_ipv6 &&
+	    (s = VTCP_connect(vep->ipv6, msec)) >= 0)
+		*ap = vep->ipv6;
+	else
+		return (-1);
+
+	tmo -= VTIM_real() - t_start;
+
+	tsp = NULL;
+	if (tmo > 0)
+		tsp = bssl_vtp_init(s, tmo, vsl, vep->sslflags, vep->hosthdr);
+
+	if (tsp == NULL) {
+		*ap = NULL;
+		VTCP_close(&s);
+		return (-1);
+	}
+
+	if (ptsp != NULL)
+		*ptsp = tsp;
+	else
+		bssl_vtp_fini(&tsp);
+
+	return (s);
+}
+
+static void v_matchproto_(cp_close_f)
+vtp_bssl_close(struct pfd *pfd)
+{
+	CHECK_OBJ_NOTNULL(pfd, PFD_MAGIC);
+	bssl_vtp_fini(&pfd->tls);
+	VTCP_close(&pfd->fd);
+}
+
+static void v_matchproto_(cp_begin_f)
+vtp_bssl_begin(struct pfd *pfd, struct vsl_log *vsl)
+{
+	CHECK_OBJ_NOTNULL(pfd, PFD_MAGIC);
+	bssl_vtp_begin(pfd->tls, vsl);
+}
+
+static void v_matchproto_(cp_end_f)
+vtp_bssl_end(struct pfd *pfd)
+{
+	CHECK_OBJ_NOTNULL(pfd, PFD_MAGIC);
+	bssl_vtp_end(pfd->tls);
+}
+
+static const struct vco * v_matchproto_(cp_oper_f)
+vtp_bssl_oper(struct pfd *pfd, void **ppriv)
+{
+	CHECK_OBJ_NOTNULL(pfd, PFD_MAGIC);
+	return (VTLS_conn_oper_backend(pfd->tls, ppriv));
+}
+
+static const struct cp_methods bssl_methods = {
+	.open = vtp_bssl_open,
+	.close = vtp_bssl_close,
+	.begin = vtp_bssl_begin,
+	.end = vtp_bssl_end,
+	.oper = vtp_bssl_oper,
+	.local_name = vtp_local_name,	/* Borrow from VTP */
+	.remote_name = vtp_remote_name,	/* Borrow from VTP */
 };
 
 /*--------------------------------------------------------------------
@@ -844,6 +972,17 @@ VCP_Ref(const struct vrt_endpoint *vep, const char *ident)
 			VSHA256_Update(cx, "IP6", 4); // include \0
 			VSHA256_Update(cx, vep->ipv6, vsa_suckaddr_len);
 		}
+		if (vep->sslflags) {
+			VSHA256_Update(cx, "TLS", 4); // include \0
+			VSHA256_Update(cx, &vep->sslflags,
+			    sizeof(vep->sslflags));
+
+			if (vep->hosthdr != NULL) {
+				VSHA256_Update(cx, "HOST", 5); // include \0
+				VSHA256_Update(cx, vep->hosthdr,
+				    strlen(vep->hosthdr));
+			}
+		}
 	}
 	CHECK_OBJ_ORNULL(vep->preamble, VRT_BLOB_MAGIC);
 	if (vep->preamble != NULL && vep->preamble->len > 0) {
@@ -861,6 +1000,8 @@ VCP_Ref(const struct vrt_endpoint *vep, const char *ident)
 	memcpy(cp->ident, digest, sizeof cp->ident);
 	if (vep->uds_path != NULL)
 		cp->methods = &vus_methods;
+	else if (vep->sslflags & BSSL_F_ENABLE)
+		cp->methods = &bssl_methods;
 	else
 		cp->methods = &vtp_methods;
 	Lck_New(&cp->mtx, lck_conn_pool);

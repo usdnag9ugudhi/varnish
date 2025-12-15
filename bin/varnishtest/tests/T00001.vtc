@@ -1,0 +1,32 @@
+varnishtest "Backend TLS connection test"
+
+# Test backend TLS connections to a TLS server
+
+server s1 {
+	tls_config {
+		# Use the builtin self-signed cert (CN=example.com)
+	}
+	tls_handshake
+	rxreq
+	txresp -hdr "X-Backend: ssl"
+} -start
+
+varnish v1 -vcl {
+	backend ssl_backend {
+		.host = "${s1_addr}";
+		.port = "${s1_port}";
+		.ssl = 1;
+		.ssl_noverify = 1;
+	}
+
+	sub vcl_recv {
+		set req.backend_hint = ssl_backend;
+	}
+} -start
+
+client c1 {
+	txreq
+	rxresp
+	expect resp.status == 200
+	expect resp.http.X-Backend == "ssl"
+} -run

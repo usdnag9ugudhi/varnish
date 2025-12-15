@@ -83,6 +83,8 @@ varnishd_SOURCES = \
 	http2/cache_http2_proto.c \
 	http2/cache_http2_send.c \
 	http2/cache_http2_session.c \
+	tls/cache_tls.c \
+	tls/cache_backend_ssl.c \
 	mgt/mgt_child.c \
 	mgt/mgt_cli.c \
 	mgt/mgt_jail.c \
@@ -159,6 +161,8 @@ noinst_HEADERS = \
 	hpack/vhp.h \
 	http1/cache_http1.h \
 	http2/cache_http2.h \
+	tls/cache_tls.h \
+	cache/cache_conn_pool_ssl.h \
 	mgt/mgt.h \
 	mgt/mgt_vcl.h \
 	mgt/mgt_param.h \
@@ -184,7 +188,8 @@ varnishd_CFLAGS = \
 	-DNOT_IN_A_VMOD \
 	-DVARNISH_STATE_DIR='"${VARNISH_STATE_DIR}"' \
 	-DVARNISH_VMOD_DIR='"${vmoddir}"' \
-	-DVARNISH_VCL_DIR='"${pkgsysconfdir}:${vcldir}"'
+	-DVARNISH_VCL_DIR='"${pkgsysconfdir}:${vcldir}"' \
+	${OPENSSL_CFLAGS}
 
 varnishd_LDFLAGS = -export-dynamic
 
@@ -194,7 +199,8 @@ varnishd_LDADD = \
 	$(top_builddir)/lib/libvsc/libvsc.la \
 	$(top_builddir)/lib/libvgz/libvgz.la \
 	@JEMALLOC_LDADD@ \
-	${DL_LIBS} ${PTHREAD_LIBS} ${NET_LIBS} ${RT_LIBS} ${LIBM}
+	${DL_LIBS} ${PTHREAD_LIBS} ${NET_LIBS} ${RT_LIBS} ${LIBM} \
+	${OPENSSL_LIBS} ${LIBCRYPTO_LIBS}
 
 if WITH_UNWIND
 varnishd_CFLAGS += -DUNW_LOCAL_ONLY ${LIBUNWIND_CFLAGS}

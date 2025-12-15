@@ -32,6 +32,7 @@ Naming scheme
 	id ~ ^s		--> Slow tests, expiry, grace etc.
 	id ~ ^t		--> Transport protocol tests
 	id ~ ^t02	--> HTTP2
+	id ~ ^T		--> TLS
 	id ~ ^u		--> Utilities and background processes
 	id ~ ^v		--> VCL tests: execute VRT functions
 	id ~ ^x		--> VEXT tests

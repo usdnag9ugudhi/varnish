@@ -86,10 +86,11 @@ void VCP_Recycle(const struct worker *, struct pfd **);
 	 */
 
 struct pfd *VCP_Get(struct conn_pool *, vtim_dur tmo, struct worker *,
-    unsigned force_fresh, int *err);
+    unsigned force_fresh, int *err, struct vsl_log *vsl);
 	/*
 	 * Get a (possibly) recycled connection.
 	 * errno will be stored in err
+	 * vsl is used for TLS logging
 	 */
 
 const struct vco *VCP_Get_Oper(struct pfd *pfd, void **ppriv);
