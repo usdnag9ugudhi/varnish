@@ -118,6 +118,11 @@ AC_SUBST(LIBM)
 
 m4_ifndef([PKG_PROG_PKG_CONFIG], [m4_fatal([pkg.m4 missing, please install pkg-config])])
 PKG_PROG_PKG_CONFIG
+
+# OpenSSL/libcrypto for vtest2 TLS support
+PKG_CHECK_MODULES([OPENSSL], [libssl])
+PKG_CHECK_MODULES([LIBCRYPTO], [libcrypto])
+
 if test -n $PKG_CONFIG; then
    PKG_CHECK_MODULES([PCRE2], [libpcre2-8])
 else

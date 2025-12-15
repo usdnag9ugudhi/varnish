@@ -40,6 +40,7 @@ varnishtest_SOURCES = \
 		vtest2/src/teken_subr_compat.h \
 		vtest2/src/teken_wcwidth.h \
 		vtest2/src/vtc.c \
+		vtest2/src/vtc_asn_gentm.c \
 		vtest2/src/vtc_barrier.c \
 		vtest2/src/vtc_client.c \
 		vtest2/src/vtc_gzip.c \
@@ -63,6 +64,8 @@ varnishtest_SOURCES = \
 		vtest2/src/vtc_sess.c \
 		vtest2/src/vtc_subr.c \
 		vtest2/src/vtc_syslog.c \
+		vtest2/src/vtc_tls.c \
+		vtest2/src/builtin_cert.h \
 		vtest2/src/vtc_tunnel.c \
 		vtest2/src/vtc_varnish.c \
 		vtest2/src/vtc_vsm.c \
@@ -74,13 +77,15 @@ varnishtest_LDADD = \
 		$(top_builddir)/lib/libvarnishapi/libvarnishapi.la \
 		$(top_builddir)/lib/libvarnish/libvarnish.la \
 		$(top_builddir)/lib/libvgz/libvgz.la \
-		${PTHREAD_LIBS} ${NET_LIBS} ${LIBM} -ldl
+		${PTHREAD_LIBS} ${NET_LIBS} ${LIBM} -ldl \
+		${OPENSSL_LIBS} ${LIBCRYPTO_LIBS}
 
 varnishtest_CFLAGS = \
 		-DVTEST_WITH_VTC_LOGEXPECT \
 		-DVTEST_WITH_VTC_VARNISH \
 		-DVTEST_WITH_VTC_VSM \
-		-DTOP_BUILDDIR='"${top_builddir}"'
+		-DTOP_BUILDDIR='"${top_builddir}"' \
+		${OPENSSL_CFLAGS} ${LIBCRYPTO_CFLAGS}
 
 EXTRA_DIST = $(srcdir)/vtest2/src/../tests/*.vtc \
 	$(top_srcdir)/bin/varnishtest/tests/*.vtc \
