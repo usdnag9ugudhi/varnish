@@ -34,6 +34,7 @@
 
 struct conn_pool;
 struct pfd;
+struct vco;
 
 #define PFD_STATE_AVAIL		(1<<0)
 #define PFD_STATE_USED		(1<<1)
@@ -74,12 +75,6 @@ void VCP_Rel(struct conn_pool **);
 	 * closed.
 	 */
 
-int VCP_Open(struct conn_pool *, vtim_dur tmo, VCL_IP *, int*);
-	/*
-	 * Open a new connection and return the address used.
-	 * errno will be returned in the last argument.
-	 */
-
 void VCP_Close(struct pfd **);
 	/*
 	 * Close a connection.
@@ -95,6 +90,12 @@ struct pfd *VCP_Get(struct conn_pool *, vtim_dur tmo, struct worker *,
 	/*
 	 * Get a (possibly) recycled connection.
 	 * errno will be stored in err
+	 */
+
+const struct vco *VCP_Get_Oper(struct pfd *pfd, void **ppriv);
+	/*
+	 * Get connection operations for a pooled connection.
+	 * Returns VCO_default if no method-specific operations.
 	 */
 
 int VCP_Wait(struct worker *, struct pfd *, vtim_real tmo);

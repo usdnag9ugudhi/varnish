@@ -38,6 +38,7 @@
 #include <stdlib.h>
 
 #include "cache_varnishd.h"
+#include "cache_conn_oper.h"
 #include "cache_filter.h"
 #include "cache_pool.h"
 #include "cache_transport.h"
@@ -180,6 +181,8 @@ Req_New(struct sess *sp, const struct req *preq)
 	req->htc = (void*)p;
 	INIT_OBJ(req->htc, HTTP_CONN_MAGIC);
 	req->htc->doclose = SC_NULL;
+	req->htc->oper = VCO_default;
+	req->htc->oper_priv = NULL;
 	p = (void*)PRNDUP(p + sizeof(*req->htc));
 
 	if (UNLIKELY(preq != NULL))

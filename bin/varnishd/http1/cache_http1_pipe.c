@@ -34,6 +34,7 @@
 #include "config.h"
 
 #include "cache/cache_varnishd.h"
+#include "cache/cache_conn_oper.h"
 
 #include <poll.h>
 #include <stdio.h>
@@ -46,18 +47,24 @@
 
 static struct lock pipestat_mtx;
 
+struct rdf_vco {
+	int			fd;
+	const struct vco	*oper;
+	void			*oper_priv;
+};
+
 static int
-rdf(int fd0, int fd1, uint64_t *pcnt)
+rdf(struct rdf_vco *src, struct rdf_vco *dst, uint64_t *pcnt)
 {
 	ssize_t i, j;
 	char buf[BUFSIZ], *p;
 
-	i = read(fd0, buf, sizeof buf);
+	i = src->oper->read(src->oper_priv, src->fd, buf, sizeof buf);
 	VTCP_Assert(i);
 	if (i <= 0)
 		return (1);
 	for (p = buf; i > 0; i -= j, p += j) {
-		j = write(fd1, p, i);
+		j = dst->oper->write(dst->oper_priv, dst->fd, p, i);
 		VTCP_Assert(j);
 		if (j <= 0)
 			return (1);
@@ -120,16 +127,30 @@ V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a,
     vtim_real deadline)
 {
 	struct pollfd fds[2];
+	struct rdf_vco rdf_c, rdf_b;
 	vtim_dur tmo, tmo_task;
 	stream_close_t sc;
-	int i, j;
+	int i;
+	ssize_t j;
 
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
 	CHECK_OBJ_NOTNULL(req->sp, SESS_MAGIC);
 	assert(fd > 0);
 
+	/* Client side VCO */
+	rdf_c.fd = req->sp->fd;
+	rdf_c.oper = req->htc->oper;
+	rdf_c.oper_priv = req->htc->oper_priv;
+
+	/* Backend side - use VCO_default for now
+	 * TODO: When backend TLS is implemented, pass oper from pfd */
+	rdf_b.fd = fd;
+	rdf_b.oper = VCO_default;
+	rdf_b.oper_priv = NULL;
+
 	if (req->htc->pipeline_b != NULL) {
-		j = write(fd,  req->htc->pipeline_b,
+		j = rdf_b.oper->write(rdf_b.oper_priv, rdf_b.fd,
+		    req->htc->pipeline_b,
 		    req->htc->pipeline_e - req->htc->pipeline_b);
 		VTCP_Assert(j);
 		if (j < 0)
@@ -161,7 +182,7 @@ V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a,
 		if (i < 1)
 			break;
 		if (fds[0].revents &&
-		    rdf(fd, req->sp->fd, &v1a->out)) {
+		    rdf(&rdf_b, &rdf_c, &v1a->out)) {
 			if (fds[1].fd == -1)
 				break;
 			(void)shutdown(fd, SHUT_RD);
@@ -170,7 +191,7 @@ V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a,
 			fds[0].fd = -1;
 		}
 		if (fds[1].revents &&
-		    rdf(req->sp->fd, fd, &v1a->in)) {
+		    rdf(&rdf_c, &rdf_b, &v1a->in)) {
 			if (fds[0].fd == -1)
 				break;
 			(void)shutdown(req->sp->fd, SHUT_RD);

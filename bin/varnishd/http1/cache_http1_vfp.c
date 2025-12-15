@@ -40,6 +40,7 @@
 #include <inttypes.h>
 
 #include "cache/cache_varnishd.h"
+#include "cache/cache_conn_oper.h"
 #include "cache/cache_filter.h"
 #include "cache_http1.h"
 
@@ -74,7 +75,7 @@ v1f_read(const struct vfp_ctx *vc, struct http_conn *htc, void *d, ssize_t len)
 			htc->pipeline_b = htc->pipeline_e = NULL;
 	}
 	if (len > 0) {
-		i = read(*htc->rfd, p, len);
+		i = htc->oper->read(htc->oper_priv, *htc->rfd, p, len);
 		if (i < 0) {
 			VTCP_Assert(i);
 			VSLbs(vc->wrk->vsl, SLT_FetchError,

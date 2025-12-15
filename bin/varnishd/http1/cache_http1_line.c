@@ -43,6 +43,7 @@
 
 #include <sys/uio.h>
 #include "cache/cache_varnishd.h"
+#include "cache/cache_conn_oper.h"
 #include "cache/cache_filter.h"
 
 #include <stdio.h>
@@ -69,6 +70,8 @@ struct v1l {
 	struct ws		*ws;
 	uintptr_t		ws_snap;
 	void			**vdp_priv;
+	const struct vco	*oper;
+	void			*oper_priv;
 };
 
 /*--------------------------------------------------------------------
@@ -78,13 +81,14 @@ struct v1l {
 
 struct v1l *
 V1L_Open(struct ws *ws, int *fd, struct vsl_log *vsl,
-    vtim_real deadline, unsigned niov)
+    vtim_real deadline, unsigned niov, const struct vco *oper, void *oper_priv)
 {
 	struct v1l *v1l;
 	unsigned u;
 	uintptr_t ws_snap;
 	size_t sz;
 
+	AN(oper);
 	if (WS_Overflowed(ws))
 		return (NULL);
 
@@ -119,6 +123,8 @@ V1L_Open(struct ws *ws, int *fd, struct vsl_log *vsl,
 	v1l->deadline = deadline;
 	v1l->vsl = vsl;
 	v1l->werr = SC_NULL;
+	v1l->oper = oper;
+	v1l->oper_priv = oper_priv;
 
 	sz = u * sizeof(struct iovec);
 	assert(sz < UINT_MAX);
@@ -232,7 +238,8 @@ V1L_Flush(struct v1l *v1l)
 				break;
 			}
 
-			i = writev(*v1l->wfd, v1l->iov, v1l->niov);
+			i = v1l->oper->writev(v1l->oper_priv, *v1l->wfd,
+			    v1l->iov, v1l->niov);
 			if (i > 0) {
 				v1l->cnt += (size_t)i;
 				if ((size_t)i == v1l->liov)

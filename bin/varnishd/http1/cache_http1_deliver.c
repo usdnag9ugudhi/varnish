@@ -96,7 +96,7 @@ V1D_Deliver(struct req *req, int sendbody)
 
 	v1l = V1L_Open(req->wrk->aws, &req->sp->fd, req->vsl,
 	    req->t_prev + SESS_TMO(req->sp, send_timeout),
-	    cache_param->http1_iovs);
+	    cache_param->http1_iovs, req->htc->oper, req->htc->oper_priv);
 
 	if (v1l == NULL) {
 		v1d_error(req, &v1l, "Failure to init v1d (workspace_thread overflow)");

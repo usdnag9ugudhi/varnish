@@ -45,6 +45,7 @@
 #include "waiter/waiter.h"
 
 #include "cache_conn_pool.h"
+#include "cache_conn_oper.h"
 #include "cache_pool.h"
 
 #include "VSC_vcp.h"
@@ -76,11 +77,13 @@ struct pfd {
 
 typedef int cp_open_f(const struct conn_pool *, vtim_dur tmo, VCL_IP *ap);
 typedef void cp_close_f(struct pfd *);
+typedef const struct vco *cp_oper_f(struct pfd *, void **);
 typedef void cp_name_f(const struct pfd *, char *, unsigned, char *, unsigned);
 
 struct cp_methods {
 	cp_open_f				*open;
 	cp_close_f				*close;
+	cp_oper_f				*oper;
 	cp_name_f				*local_name;
 	cp_name_f				*remote_name;
 };
@@ -631,6 +634,22 @@ VCP_GetIp(struct pfd *pfd)
 
 	CHECK_OBJ_NOTNULL(pfd, PFD_MAGIC);
 	return (pfd->addr);
+}
+
+/*--------------------------------------------------------------------*/
+
+const struct vco *
+VCP_Get_Oper(struct pfd *pfd, void **ppriv)
+{
+
+	CHECK_OBJ_NOTNULL(pfd, PFD_MAGIC);
+	AN(ppriv);
+
+	if (pfd->conn_pool->methods->oper != NULL)
+		return (pfd->conn_pool->methods->oper(pfd, ppriv));
+
+	*ppriv = NULL;
+	return (VCO_default);
 }
 
 /*--------------------------------------------------------------------*/

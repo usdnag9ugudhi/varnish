@@ -92,6 +92,8 @@ struct worker_priv {
  *
  */
 
+struct vco;
+
 struct http_conn {
 	unsigned		magic;
 #define HTTP_CONN_MAGIC		0x3e19edd1
@@ -106,6 +108,8 @@ struct http_conn {
 	char			*pipeline_e;
 	ssize_t			content_length;
 	void			*priv;
+	const struct vco	*oper;
+	void			*oper_priv;
 
 	/* Timeouts */
 	vtim_dur		first_byte_timeout;
@@ -463,6 +467,7 @@ void HTC_RxPipeline(struct http_conn *htc, char *);
 enum htc_status_e HTC_RxStuff(struct http_conn *, htc_complete_f *,
     vtim_real *t1, vtim_real *t2, vtim_real ti, vtim_real tn, vtim_dur td,
     int maxbytes);
+ssize_t HTC_Read(struct http_conn *htc, void *buf, size_t len, vtim_dur tmo);
 
 #define SESS_ATTR(UP, low, typ, len)					\
 	int SES_Set_##low(const struct sess *sp, const typ *src);	\

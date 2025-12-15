@@ -58,11 +58,13 @@ stream_close_t V1P_Process(const struct req *, int fd, struct v1p_acct *,
     vtim_real deadline);
 void V1P_Charge(struct req *, const struct v1p_acct *, struct VSC_vbe *);
 
+struct vco;
+
 /* cache_http1_line.c */
 void V1L_Chunked(struct v1l *v1l);
 void V1L_EndChunk(struct v1l *v1l);
 struct v1l * V1L_Open(struct ws *, int *fd, struct vsl_log *,
-    vtim_real deadline, unsigned niov);
+    vtim_real deadline, unsigned niov, const struct vco *oper, void *oper_priv);
 void V1L_NoRollback(struct v1l *v1l);
 stream_close_t V1L_Flush(struct v1l *v1l);
 stream_close_t V1L_Close(struct v1l **v1lp, uint64_t *cnt);

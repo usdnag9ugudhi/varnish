@@ -41,9 +41,11 @@
 
 #include "cache_varnishd.h"
 
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "cache_conn_oper.h"
 #include "cache_pool.h"
 #include "cache_transport.h"
 
@@ -394,7 +396,7 @@ HTC_RxStuff(struct http_conn *htc, htc_complete_f *func,
 		}
 		if (tmo <= 0.0)
 			tmo = 1e-3;
-		z = VTCP_read(*htc->rfd, htc->rxbuf_e, z, tmo);
+		z = HTC_Read(htc, htc->rxbuf_e, z, tmo);
 		if (z == 0 || z == -1) {
 			WS_ReleaseP(htc->ws, htc->rxbuf_b);
 			return (HTC_S_EOF);
@@ -408,6 +410,28 @@ HTC_RxStuff(struct http_conn *htc, htc_complete_f *func,
 				return (HTC_S_TIMEOUT);
 		}
 	}
+}
+
+ssize_t
+HTC_Read(struct http_conn *htc, void *buf, size_t len, vtim_dur tmo)
+{
+	struct pollfd pfd[1];
+	int j;
+
+	CHECK_OBJ_NOTNULL(htc, HTTP_CONN_MAGIC);
+	AN(htc->rfd);
+	AN(htc->oper);
+	assert(*htc->rfd >= 0);
+
+	if (tmo > 0.0) {
+		pfd[0].fd = *htc->rfd;
+		pfd[0].events = POLLIN;
+		pfd[0].revents = 0;
+		j = poll(pfd, 1, VTIM_poll_tmo(tmo));
+		if (j == 0)
+			return (-2);
+	}
+	return (htc->oper->read(htc->oper_priv, *htc->rfd, buf, len));
 }
 
 /*--------------------------------------------------------------------

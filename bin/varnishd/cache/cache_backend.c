@@ -44,6 +44,7 @@
 #include "vsa.h"
 
 #include "cache_backend.h"
+#include "cache_conn_oper.h"
 #include "cache_conn_pool.h"
 #include "cache_transport.h"
 #include "cache_vcl.h"
@@ -347,6 +348,8 @@ vbe_dir_getfd(VRT_CTX, struct worker *wrk, VCL_BACKEND dir, struct backend *bp,
 	INIT_OBJ(bo->htc, HTTP_CONN_MAGIC);
 	bo->htc->priv = pfd;
 	bo->htc->rfd = fdp;
+	bo->htc->oper = VCP_Get_Oper(pfd, &bo->htc->oper_priv);
+	AN(bo->htc->oper);
 	bo->htc->doclose = SC_NULL;
 	FIND_TMO(first_byte_timeout,
 	    bo->htc->first_byte_timeout, bo, bp);

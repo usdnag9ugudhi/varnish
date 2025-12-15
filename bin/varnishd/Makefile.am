@@ -24,6 +24,7 @@ varnishd_SOURCES = \
 	cache/cache_ban_lurker.c \
 	cache/cache_busyobj.c \
 	cache/cache_cli.c \
+	cache/cache_conn_oper.c \
 	cache/cache_conn_pool.c \
 	cache/cache_deliver_proc.c \
 	cache/cache_director.c \
@@ -143,6 +144,7 @@ noinst_HEADERS = \
 	acceptor/cache_acceptor.h \
 	acceptor/mgt_acceptor.h \
 	cache/cache_ban.h \
+	cache/cache_conn_oper.h \
 	cache/cache_conn_pool.h \
 	cache/cache_esi.h \
 	cache/cache_obj.h \

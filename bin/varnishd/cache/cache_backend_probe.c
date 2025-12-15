@@ -52,6 +52,7 @@
 
 #include "cache_backend.h"
 #include "cache_conn_pool.h"
+#include "cache_conn_oper.h"
 
 #include "VSC_vbe.h"
 
@@ -233,30 +234,31 @@ vbp_reset(struct vbp_target *vt)
  */
 
 static int
-vbp_write(struct vbp_target *vt, int *sock, const void *buf, size_t len)
+vbp_write(struct vbp_target *vt, const struct vco *oper, void *oper_priv,
+    int fd, const void *buf, size_t len)
 {
-	int i;
+	ssize_t i;
 
-	i = write(*sock, buf, len);
+	i = oper->write(oper_priv, fd, buf, len);
 	VTCP_Assert(i);
-	if (i != len) {
+	if (i != (ssize_t)len) {
 		if (i < 0) {
 			vt->err_xmit |= 1;
 			bprintf(vt->resp_buf, "Write error %d (%s)",
 				errno, VAS_errtxt(errno));
 		} else {
 			bprintf(vt->resp_buf,
-				"Short write (%d/%zu) error %d (%s)",
+				"Short write (%zd/%zu) error %d (%s)",
 				i, len, errno, VAS_errtxt(errno));
 		}
-		VTCP_close(sock);
 		return (-1);
 	}
 	return (0);
 }
 
 static int
-vbp_write_proxy_v1(struct vbp_target *vt, int *sock)
+vbp_write_proxy_v1(struct vbp_target *vt, const struct vco *oper,
+    void *oper_priv, int fd)
 {
 	char buf[105]; /* maximum size for a TCP6 PROXY line with null char */
 	char addr[VTCP_ADDRBUFSIZE];
@@ -266,7 +268,7 @@ vbp_write_proxy_v1(struct vbp_target *vt, int *sock)
 	int proto;
 	struct vsb vsb;
 
-	sua = VSA_getsockname(*sock, vsabuf, sizeof vsabuf);
+	sua = VSA_getsockname(fd, vsabuf, sizeof vsabuf);
 	AN(sua);
 	AN(VSB_init(&vsb, buf, sizeof buf));
 
@@ -282,26 +284,33 @@ vbp_write_proxy_v1(struct vbp_target *vt, int *sock)
 	AZ(VSB_finish(&vsb));
 
 	VSB_fini(&vsb);
-	return (vbp_write(vt, sock, buf, strlen(buf)));
+	return (vbp_write(vt, oper, oper_priv, fd, buf, strlen(buf)));
 }
 
 static void
-vbp_poke(struct vbp_target *vt)
+vbp_poke(struct vbp_target *vt, struct worker *wrk)
 {
-	int s, i, proxy_header, err;
+	struct pfd *pfd;
+	const struct vco *oper;
+	void *oper_priv;
+	int *fdp, i, proxy_header, err;
 	vtim_real t_start, t_now, t_end;
 	vtim_dur tmo;
 	unsigned rlen, resp;
 	char buf[8192], *p;
-	struct pollfd pfda[1], *pfd = pfda;
-	const struct suckaddr *sa;
+	struct pollfd pfda[1], *pf = pfda;
+	ssize_t r;
+	VCL_IP addr;
+
+	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 
 	t_start = t_now = VTIM_real();
 	t_end = t_start + vt->timeout;
 
-	s = VCP_Open(vt->conn_pool, t_end - t_now, &sa, &err);
-	if (s < 0) {
-		bprintf(vt->resp_buf, "Open error %d (%s)", err, VAS_errtxt(err));
+	pfd = VCP_Get(vt->conn_pool, t_end - t_now, wrk, 1, &err, NULL);
+	if (pfd == NULL) {
+		bprintf(vt->resp_buf, "Open error %d (%s)",
+		    err, VAS_errtxt(err));
 		Lck_Lock(&vbp_mtx);
 		if (vt->backend)
 			VBE_Connect_Error(vt->backend->vsc, err);
@@ -309,8 +318,12 @@ vbp_poke(struct vbp_target *vt)
 		return;
 	}
 
-	i = VSA_Get_Proto(sa);
-	if (VSA_Compare(sa, bogo_ip) == 0)
+	fdp = PFD_Fd(pfd);
+	addr = VCP_GetIp(pfd);
+	oper = VCP_Get_Oper(pfd, &oper_priv);
+
+	i = VSA_Get_Proto(addr);
+	if (VSA_Compare(addr, bogo_ip) == 0)
 		vt->good_unix |= 1;
 	else if (i == AF_INET)
 		vt->good_ipv4 |= 1;
@@ -325,7 +338,7 @@ vbp_poke(struct vbp_target *vt)
 		bprintf(vt->resp_buf,
 			"Open timeout %.3fs exceeded by %.3fs",
 			vt->timeout, -tmo);
-		VTCP_close(&s);
+		VCP_Close(&pfd);
 		return;
 	}
 
@@ -338,30 +351,37 @@ vbp_poke(struct vbp_target *vt)
 
 	if (proxy_header < 0) {
 		bprintf(vt->resp_buf, "%s", "No backend");
-		VTCP_close(&s);
+		VCP_Close(&pfd);
 		return;
 	}
 
 	/* Send the PROXY header */
 	assert(proxy_header <= 2);
 	if (proxy_header == 1) {
-		if (vbp_write_proxy_v1(vt, &s) != 0)
+		if (vbp_write_proxy_v1(vt, oper, oper_priv, *fdp) != 0) {
+			VCP_Close(&pfd);
 			return;
+		}
 	} else if (proxy_header == 2 &&
-	    vbp_write(vt, &s, vbp_proxy_local, sizeof vbp_proxy_local) != 0)
+	    vbp_write(vt, oper, oper_priv, *fdp,
+	    vbp_proxy_local, sizeof vbp_proxy_local) != 0) {
+		VCP_Close(&pfd);
 		return;
+	}
 
 	/* Send the request */
-	if (vbp_write(vt, &s, vt->req, vt->req_len) != 0)
+	if (vbp_write(vt, oper, oper_priv, *fdp, vt->req, vt->req_len) != 0) {
+		VCP_Close(&pfd);
 		return;
+	}
 
 	vt->good_xmit |= 1;
 
-	pfd->fd = s;
+	pf->fd = *fdp;
 	rlen = 0;
 	while (1) {
-		pfd->events = POLLIN;
-		pfd->revents = 0;
+		pf->events = POLLIN;
+		pf->revents = 0;
 		t_now = VTIM_real();
 		tmo = t_end - t_now;
 		if (tmo <= 0) {
@@ -371,7 +391,7 @@ vbp_poke(struct vbp_target *vt)
 			i = -1;
 			break;
 		}
-		i = poll(pfd, 1, VTIM_poll_tmo(tmo));
+		i = poll(pf, 1, VTIM_poll_tmo(tmo));
 		if (i <= 0) {
 			if (!i) {
 				if (!vt->exp_close)
@@ -384,21 +404,21 @@ vbp_poke(struct vbp_target *vt)
 			break;
 		}
 		if (rlen < sizeof vt->resp_buf)
-			i = read(s, vt->resp_buf + rlen,
-			    sizeof vt->resp_buf - rlen);
+			r = oper->read(oper_priv, *fdp,
+			    vt->resp_buf + rlen, sizeof vt->resp_buf - rlen);
 		else
-			i = read(s, buf, sizeof buf);
-		VTCP_Assert(i);
-		if (i <= 0) {
-			if (i < 0)
+			r = oper->read(oper_priv, *fdp, buf, sizeof buf);
+		VTCP_Assert(r);
+		if (r <= 0) {
+			if (r < 0)
 				bprintf(vt->resp_buf, "Read error %d (%s)",
 					errno, VAS_errtxt(errno));
 			break;
 		}
-		rlen += i;
+		rlen += r;
 	}
 
-	VTCP_close(&s);
+	VCP_Close(&pfd);
 
 	if (i < 0) {
 		/* errno reported above */
@@ -484,7 +504,7 @@ vbp_task(struct worker *wrk, void *priv)
 	assert(vt->req_len > 0);
 
 	vbp_start_poke(vt);
-	vbp_poke(vt);
+	vbp_poke(vt, wrk);
 	vbp_has_poked(vt);
 	VBP_Update_Backend(vt);
 
