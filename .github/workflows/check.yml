@@ -1,0 +1,34 @@
+name: Make Check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            build-essential \
+            ca-certificates \
+            cpio \
+            libedit-dev \
+            libjemalloc-dev \
+            libncurses-dev \
+            libpcre2-dev \
+            libtool \
+            libunwind-dev \
+            pkg-config \
+            python3-sphinx
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - run: ./autogen.sh
+      - run: ./configure
+      - run: make -j 8
+      - run: make check -j 8
