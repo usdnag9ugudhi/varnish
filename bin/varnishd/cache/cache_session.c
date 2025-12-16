@@ -260,18 +260,13 @@ HTC_Status(enum htc_status_e e, const char **name, const char **desc)
 void
 HTC_RxInit(struct http_conn *htc, struct ws *ws)
 {
-	unsigned rollback;
 	int l;
 
 	CHECK_OBJ_NOTNULL(htc, HTTP_CONN_MAGIC);
 	htc->ws = ws;
 
-	/* NB: HTTP/1 keep-alive triggers a rollback, so does the first
-	 * request of a session or an h2 request where the rollback is a
-	 * no-op in terms of workspace usage.
-	 */
-	rollback = !strcasecmp(ws->id, "req") && htc->body_status == NULL;
-	l = WS_Pipeline(htc->ws, htc->pipeline_b, htc->pipeline_e, rollback);
+	l = WS_Pipeline(htc->ws, htc->pipeline_b, htc->pipeline_e,
+	    htc->pipeline_snap);
 	xxxassert(l >= 0);
 
 	htc->rxbuf_b = WS_Reservation(ws);
@@ -432,6 +427,38 @@ HTC_Read(struct http_conn *htc, void *buf, size_t len, vtim_dur tmo)
 			return (-2);
 	}
 	return (htc->oper->read(htc->oper_priv, *htc->rfd, buf, len));
+}
+
+/*--------------------------------------------------------------------
+ * Prune a vector of struct iovec
+ */
+
+void
+VIOV_prune(struct iovec *iov, unsigned *n, size_t l)
+{
+	unsigned u;
+
+	if (l == 0)
+		return;
+
+	AN(iov);
+	AN(n);
+
+	u = 0;
+	while (l > 0) {
+		assert(u < *n);
+		if (iov[u].iov_len <= l) {
+			l -= iov[u].iov_len;
+			u++;
+		} else {
+			iov[u].iov_base = (char *)iov[u].iov_base + l;
+			iov[u].iov_len -= l;
+			break;
+		}
+	}
+
+	memmove(iov, &iov[u], (*n - u) * sizeof *iov);
+	*n -= u;
 }
 
 /*--------------------------------------------------------------------

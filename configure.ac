@@ -488,6 +488,8 @@ else
 	ac_cv_func_port_create=no
 fi
 
+AC_CHECK_FUNCS([eventfd])
+
 # --with-persistent-storage
 AC_ARG_WITH(persistent-storage,
     AS_HELP_STRING([--with-persistent-storage],

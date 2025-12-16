@@ -106,6 +106,7 @@ struct http_conn {
 	char			*rxbuf_e;
 	char			*pipeline_b;
 	char			*pipeline_e;
+	uintptr_t		pipeline_snap;
 	ssize_t			content_length;
 	void			*priv;
 	const struct vco	*oper;
@@ -469,6 +470,8 @@ enum htc_status_e HTC_RxStuff(struct http_conn *, htc_complete_f *,
     int maxbytes);
 ssize_t HTC_Read(struct http_conn *htc, void *buf, size_t len, vtim_dur tmo);
 
+void VIOV_prune(struct iovec *iov, unsigned *n, size_t l);
+
 #define SESS_ATTR(UP, low, typ, len)					\
 	int SES_Set_##low(const struct sess *sp, const typ *src);	\
 	int SES_Reserve_##low(struct sess *sp, typ **dst, ssize_t *sz);
@@ -575,7 +578,9 @@ WS_IsReserved(const struct ws *ws)
 
 void *WS_AtOffset(const struct ws *ws, unsigned off, unsigned len);
 unsigned WS_ReservationOffset(const struct ws *ws);
-int WS_Pipeline(struct ws *, const void *b, const void *e, unsigned rollback);
+
+extern uintptr_t const ws_pipeline_rollback;
+int WS_Pipeline(struct ws *, const void *b, const void *e, uintptr_t snap);
 
 /* cache_ws_common.c */
 void WS_Id(const struct ws *ws, char *id);
