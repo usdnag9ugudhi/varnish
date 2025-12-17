@@ -230,6 +230,8 @@ h2_del_req(struct worker *wrk, struct h2_req **pr2)
 	Req_Release(req);
 }
 
+static int h2_rapid_reset(struct worker *, struct h2_sess *, struct h2_req *);
+
 void
 h2_kill_req(struct worker *wrk, struct h2_sess *h2, struct h2_req **pr2,
     h2_error h2e)
@@ -248,6 +250,14 @@ h2_kill_req(struct worker *wrk, struct h2_sess *h2, struct h2_req **pr2,
 	} else if (r2->error == NULL && r2->state < H2_S_CLOSED) {
 		/* Notify the peer only first time it is killed. */
 		H2_Send_RST(h2, r2->stream, h2e);
+	}
+
+	if (r2->error == NULL && !H2_ERROR_MATCH(h2e, H2SE_NO_ERROR)) {
+		if (h2_rapid_reset(wrk, h2, r2)) {
+			VSLb(h2->vsl, SLT_Error,
+			    "H2: Hit RST limit. Closing session.");
+			h2->error = H2CE_RAPID_RESET;
+		}
 	}
 
 	if (r2->error == NULL || H2_ERROR_MATCH(r2->error, H2SE_NO_ERROR)) {
