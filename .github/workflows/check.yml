@@ -31,4 +31,4 @@ jobs:
       - run: ./autogen.sh
       - run: ./configure
       - run: make -j 8
-      - run: make check -j 8
+      - run: make check -j 8 || tools/ci_make_recheck.sh
