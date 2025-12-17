@@ -77,7 +77,9 @@ cli_cb_before(const struct cli *cli, struct cli_proto *clp, const char *cmdn)
 	ASSERT_CLI();
 	(void)cmdn;
 
-	if (clp == NULL || !(clp->desc->flags & CLI_F_SENSITIVE))
+	if (clp == NULL ||
+	    DO_DEBUG(DBG_CLI_SHOW_SENSITIVE) ||
+	    !(clp->desc->flags & CLI_F_SENSITIVE))
 		VSL(SLT_CLI, NO_VXID, "Rd %s", VSB_data(cli->cmd));
 	Lck_Lock(&cli_mtx);
 	VCL_Poll();
@@ -92,7 +94,9 @@ cli_cb_after(const struct cli *cli, struct cli_proto *clp, const char *cmdn)
 	(void)cmdn;
 
 	Lck_Unlock(&cli_mtx);
-	if (clp == NULL || !(clp->desc->flags & CLI_F_SENSITIVE)) {
+	if (clp == NULL ||
+	    DO_DEBUG(DBG_CLI_SHOW_SENSITIVE) ||
+	    !(clp->desc->flags & CLI_F_SENSITIVE)) {
 		VSL(SLT_CLI, NO_VXID, "Wr %03u %zd %s",
 		    cli->result, VSB_len(cli->sb), VSB_data(cli->sb));
 	}
