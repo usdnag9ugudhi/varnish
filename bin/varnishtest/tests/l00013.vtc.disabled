@@ -1,0 +1,84 @@
+varnishtest "Static and dynamic backends"
+
+feature cmd jq priv_dns
+
+server s1 -repeat 10 {
+	rxreq
+	txresp
+} -start
+
+dns {
+	example.com 10 IN A ${s1_addr}
+} -start
+
+varnish v1 -vcl+backend {
+	import goto;
+	import udo;
+	import activedns;
+	import s3;
+
+	sub vcl_init {
+		new udo_director = udo.director();
+		new group = activedns.dns_group("example.com:${s1_port}");
+		udo_director.subscribe(group.get_tag());
+
+		new s3_director = s3.director("bucket", "region", "example.com:${s1_port}");
+
+		new goto_director = goto.dns_director("example.com:${s1_port}");
+	}
+
+	sub vcl_backend_fetch {
+		if (bereq.url == "/s1") {
+			set bereq.backend = s1;
+		} else if (bereq.url == "/udo_director") {
+			set bereq.backend = udo_director.backend();
+		} else if (bereq.url == "/s3_director") {
+			set bereq.backend = s3_director.backend();
+		} else if (bereq.url == "/goto_director") {
+			set bereq.backend = goto_director.backend();
+		} else if (bereq.url == "/goto_backend") {
+			set bereq.backend = goto.dns_backend("example.com:${s1_port}");
+		}
+	}
+} -start
+
+client c1 {
+	txreq -url "/s1"
+	rxresp
+	expect resp.status == 200
+
+	txreq -url "/udo_director"
+	rxresp
+	expect resp.status == 200
+
+	txreq -url "/s3_director"
+	rxresp
+	expect resp.status == 200
+
+	txreq -url "/goto_director"
+	rxresp
+	expect resp.status == 200
+
+	txreq -url "/goto_backend"
+	rxresp
+	expect resp.status == 200
+} -run
+
+# give some time for the logs to land (0.1s is overly generous)
+delay 0.1
+
+shell {
+	t() {
+		set -ex
+		test "$(varnishlog-json -b -$2 -n ${v1_name} -d | jq -r "select(.req.url == \"$1\") | .$3" )" = "$4"
+	}
+
+	varnishlog-json -b -n ${v1_name} -d
+	varnishlog-json -b -n ${v1_name} -d | jq >${tmpdir}/varnishlog-json-006.out
+
+	t /s1 b backend.name s1
+	t /udo_director b backend.name udo_director
+	t /s3_director b backend.name s3_director
+	t /goto_director b backend.name goto
+	t /goto_backend b backend.name goto
+}

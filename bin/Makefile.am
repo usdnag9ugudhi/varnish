@@ -5,6 +5,7 @@ SUBDIRS = \
 	varnishd \
 	varnishhist \
 	varnishlog \
+	varnishlog-json \
 	varnishncsa \
 	varnishstat \
 	varnishtop \

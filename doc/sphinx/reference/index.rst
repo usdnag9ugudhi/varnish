@@ -60,6 +60,7 @@ Logging and monitoring
 	VSL - The log records Varnish generates <vsl>
 	VSLQ - Filter/Query expressions for VSL <vsl-query>
 	VarnishLog - Logging raw VSL <varnishlog>
+	VarnishLog-JSON - Logging in JSON format <varnishlog-json>
 	VarnishNCSA - Logging in NCSA format <varnishncsa>
 	VarnishHist - Realtime response histogram display <varnishhist>
 	VarnishTop - Realtime activity display <varnishtop>
