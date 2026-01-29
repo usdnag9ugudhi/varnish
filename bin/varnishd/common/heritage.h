@@ -38,6 +38,7 @@ struct transport;
 struct VCLS;
 struct uds_perms;
 struct conn_heritage;
+struct vtls;
 
 struct listen_sock {
 	unsigned			magic;
@@ -52,6 +53,7 @@ struct listen_sock {
 	const struct suckaddr		*addr;
 	const struct transport		*transport;
 	const struct uds_perms		*perms;
+	struct vtls			*tls;
 	unsigned			test_heritage;
 	struct conn_heritage		*conn_heritage;
 	struct acceptor			*vca;
@@ -75,6 +77,9 @@ struct heritage {
 
 	/* Hash method */
 	const struct hash_slinger	*hash;
+
+	/* Global TLS configuration */
+	struct vtls			*tls;
 
 	struct params			*param;
 

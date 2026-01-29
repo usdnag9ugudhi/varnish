@@ -45,6 +45,7 @@
 #include "cache/cache_transport.h"
 #include "cache_http1.h"
 
+#include "tls/cache_tls.h"
 #include "vtcp.h"
 
 static const char H1NEWREQ[] = "HTTP1::NewReq";
@@ -393,6 +394,8 @@ HTTP1_Session(struct worker *wrk, struct req *req)
 			VCL_TaskEnter(req->top->privs);
 			http1_setstate(sp, H1PROC);
 		} else if (st == H1PROC) {
+			/* Hand the TLS bits a VSL to write to */
+			VTLS_vsl_set(sp->tls, req->vsl);
 			req->task->func = http1_req;
 			req->task->priv = req;
 			CNT_Embark(wrk, req);
@@ -406,6 +409,11 @@ HTTP1_Session(struct worker *wrk, struct req *req)
 			assert(!WS_IsReserved(wrk->aws));
 			http1_setstate(sp, H1CLEANUP);
 		} else if (st == H1CLEANUP) {
+			/*
+			 * Ensure the TLS bits don't hold on to a
+			 * stale vsl buf
+			 */
+			VTLS_vsl_set(sp->tls, NULL);
 
 			assert(!WS_IsReserved(wrk->aws));
 			assert(!WS_IsReserved(req->ws));

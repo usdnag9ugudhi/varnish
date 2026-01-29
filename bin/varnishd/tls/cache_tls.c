@@ -61,10 +61,13 @@ VTLS_vsl_ssllog(struct vtls_log *log)
 {
 	unsigned long e;
 	char buf[256];
+	int tag;
+
+	tag = log->is_client ? SLT_TLS : SLT_BackendSSL;
 
 	while ((e = ERR_get_error())) {
 		ERR_error_string_n(e, buf, sizeof buf);
-		VTLS_LOG(log, SLT_BackendSSL, "%s", buf);
+		VTLS_LOG(log, tag, "%s", buf);
 	}
 }
 
@@ -245,7 +248,8 @@ VTLS_do_handshake(struct vtls_sess *tsp, int fd, double tmo)
 		if (t_poll <= 0 || i == 0)
 			errno = ETIMEDOUT;
 		if (t_poll <= 0 || i <= 0) {
-			VTLS_LOG(tsp->log, SLT_BackendSSL, "Handshake timeout");
+			int tag = tsp->log->is_client ? SLT_TLS : SLT_BackendSSL;
+			VTLS_LOG(tsp->log, tag, "Handshake timeout");
 			VTLS_vsl_ssllog(tsp->log);
 			return (1);
 		}

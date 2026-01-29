@@ -126,6 +126,7 @@ struct vcf;
 struct VSC_lck;
 struct VSC_main;
 struct VSC_main_wrk;
+struct vtls_sess;
 struct worker;
 struct worker_priv;
 
@@ -594,6 +595,7 @@ struct sess {
 	vtim_dur		timeout_linger;
 	vtim_dur		send_timeout;
 	vtim_dur		idle_send_timeout;
+	struct vtls_sess	*tls;		/* TLS session state */
 };
 
 #define SESS_TMO(sp, tmo)					\

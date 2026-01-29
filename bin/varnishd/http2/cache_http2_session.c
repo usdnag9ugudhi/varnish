@@ -423,6 +423,11 @@ h2_new_session(struct worker *wrk, void *arg)
 	AZ(wrk->vsl);
 	wrk->vsl = h2->vsl;
 
+	if (sp->tls != NULL) {
+		/* Hand the TLS bits a relevant VSL to write to */
+		VTLS_vsl_set(sp->tls, h2->vsl);
+	}
+
 	if (marker == H2_OU_MARKER) {
 		/* Deal with opportunistic upgrade. The upgrade request
 		 * was received by HTTP/1 and is held in req. The response

@@ -38,6 +38,7 @@ include $(srcdir)/automake_boilerplate_purge.am
 include $(srcdir)/automake_boilerplate_std.am
 include $(srcdir)/automake_boilerplate_unix.am
 include $(srcdir)/automake_boilerplate_vtc.am
+include $(srcdir)/automake_boilerplate_tls.am
 
 #
 # Post-boilerplate tweaks

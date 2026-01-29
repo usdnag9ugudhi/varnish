@@ -49,6 +49,8 @@ CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
 
 AC_PROG_INSTALL
+AC_PROG_YACC
+AM_PROG_LEX
 
 AC_ARG_WITH([rst2man],
   AS_HELP_STRING([--with-rst2man=PATH], [Location of rst2man (auto)]),

@@ -1086,6 +1086,33 @@ PARAM_SIMPLE(
 )
 
 PARAM_SIMPLE(
+	/* name */	tls_handshake_timeout,
+	/* type */	duration,
+	/* min */	"0.000",
+	/* max */	NULL,
+	/* def */	"8.000",
+	/* units */	"seconds",
+	/* descr */
+	"The maximum time allowed for the TLS handshake to complete when "
+	"accepting client-side TLS connections. If the handshake does not "
+	"complete within this time, the connection is closed."
+)
+
+PARAM_SIMPLE(
+	/* name */	tls_ja3,
+	/* type */	boolean,
+	/* min */	NULL,
+	/* max */	NULL,
+	/* def */	"off",
+	/* units */	"bool",
+	/* descr */
+	"Enable JA3 TLS client fingerprinting for incoming TLS connections. "
+	"When enabled, the JA3 fingerprint string can be accessed via the "
+	"tls VMOD using tls.ja3(). The fingerprint can be used for client "
+	"identification and classification."
+)
+
+PARAM_SIMPLE(
 	/* name */	transit_buffer,
 	/* type */	bytes,
 	/* min */	"0k",

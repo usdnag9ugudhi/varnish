@@ -245,6 +245,11 @@ extern char *mgt_cc_warn;
 extern const char *mgt_vcl_path;
 extern const char *mgt_vmod_path;
 
+/*
+ * OpenSSL headers include pthread.h, so we need to allow it in files
+ * that use OpenSSL. Define MGT_ALLOW_PTHREAD before including mgt.h.
+ */
+#ifndef MGT_ALLOW_PTHREAD
 #if defined(PTHREAD_CANCELED) || defined(PTHREAD_MUTEX_DEFAULT)
 #error "Keep pthreads out of the manager process"
 #endif
@@ -256,6 +261,7 @@ pthread_create(void)
 
 	WRONG("Intentional conflict with pthread.h");
 }
+#endif /* !MGT_ALLOW_PTHREAD */
 
 #define MGT_FEATURE(x)		COM_FEATURE(mgt_param.feature_bits, x)
 #define MGT_EXPERIMENT(x)	COM_EXPERIMENT(mgt_param.experimental_bits, x)

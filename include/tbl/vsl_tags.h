@@ -170,6 +170,12 @@ SLTM(BackendSSL, 0, "Backend TLS connection info",
 	"TLS handshake and connection state.\n\n"
 )
 
+SLTM(TLS, 0, "Client-side TLS connection info",
+	"Logs TLS/SSL connection information for client connections.\n\n"
+	"Contains error messages or informational messages related to\n"
+	"TLS handshake and connection state.\n\n"
+)
+
 SLTM(HttpGarbage, SLT_F_UNSAFE, "Unparseable HTTP request",
 	"Logs the content of unparseable HTTP requests.\n\n"
 )

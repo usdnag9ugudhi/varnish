@@ -1,0 +1,80 @@
+$Module tls 3 "TLS"
+$ABI strict
+
+DESCRIPTION
+===========
+
+The ``tls`` vmod lets you query details relating to a TLS connection.
+
+If called from one of the client VCL subroutines (e.g. ``sub vcl_recv`` or
+``sub vcl_deliver``), it will provide details about the client TLS
+connection.
+
+If called from ``sub vcl_backend_response``, vmod-tls will show details
+from the currently established TLS backend connection.
+
+EXAMPLES
+========
+
+Client connection
+-----------------
+
+The following example will report which TLS version and which cipher
+is used for the client connection.
+
+::
+
+  import tls;
+
+  sub vcl_deliver {
+    if (tls.is_tls()) {
+      # Report cipher and TLS version as a response header
+      set resp.http.tls-version = tls.version();
+      set resp.http.tls-cipher = tls.cipher();
+    }
+  }
+
+API
+===
+
+$Function BOOL is_tls()
+$Restrict client vcl_backend_response vcl_pipe
+
+Indicates whether the peer is connected over an SSL/TLS connection.
+
+$Function STRING version()
+$Restrict client vcl_backend_response vcl_pipe
+
+Returns the TLS version in use for this connection. E.g. "TLSv1.2".
+
+$Function STRING ja3()
+
+Returns the ja3 fingerprint for this connection if the ``tls_ja3`` parameter
+has been enabled.
+
+$Function STRING cipher()
+$Restrict client vcl_backend_response vcl_pipe
+
+Returns the cipher that was chosen during the TLS handshake.
+
+$Function STRING authority()
+$Restrict client vcl_backend_response vcl_pipe
+
+Returns the hostname presented for Server Name Indication (SNI).
+
+$Function STRING alpn()
+$Restrict client vcl_backend_response vcl_pipe
+
+Returns the result of the Application Layer Protocol
+Negotiation (ALPN). This will contain one of "http/1.1",
+"h2" or NULL if no ALPN happened.
+
+$Function STRING cert_sign()
+$Restrict client vcl_backend_response vcl_pipe
+
+Certificate signature algorithm. E.g. "SHA256".
+
+$Function STRING cert_key()
+$Restrict client vcl_backend_response vcl_pipe
+
+The algorithm used to generate the certificate. E.g. "RSA2048".

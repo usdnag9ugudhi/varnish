@@ -86,7 +86,11 @@ varnishd_SOURCES = \
 	http2/cache_http2_session.c \
 	tls/cache_tls.c \
 	tls/cache_backend_ssl.c \
+	tls/cache_client_ssl.c \
 	mgt/mgt_child.c \
+	mgt/mgt_tls_conf.c \
+	mgt/vtls_cfg/vtls_cfg_lexer.l \
+	mgt/vtls_cfg/vtls_cfg_parser.y \
 	mgt/mgt_cli.c \
 	mgt/mgt_jail.c \
 	mgt/mgt_jail_solaris.c \
@@ -157,14 +161,18 @@ noinst_HEADERS = \
 	cache/cache_vcl.h \
 	cache/cache_vgz.h \
 	common/heritage.h \
+	common/common_vtls_types.h \
+	common/common_tls_protos.h \
 	common/vsmw.h \
 	hash/hash_slinger.h \
 	hpack/vhp.h \
 	http1/cache_http1.h \
 	http2/cache_http2.h \
 	tls/cache_tls.h \
+	tls/cache_client_ssl.h \
 	cache/cache_conn_pool_ssl.h \
 	mgt/mgt.h \
+	mgt/mgt_tls_conf.h \
 	mgt/mgt_vcl.h \
 	mgt/mgt_param.h \
 	storage/storage.h \
@@ -184,6 +192,8 @@ nobase_pkginclude_HEADERS = \
 	waiter/waiter.h
 
 vcldir=$(datarootdir)/$(PACKAGE)/vcl
+
+AM_YFLAGS = -d
 
 varnishd_CFLAGS = \
 	-DNOT_IN_A_VMOD \
@@ -269,5 +279,10 @@ vhp_hufdec.h: vhp_gen_hufdec
 
 DISTCLEANFILES = builtin_vcl.c
 
-BUILT_SOURCES	=	vhp_hufdec.h
+BUILT_SOURCES	=	vhp_hufdec.h mgt/vtls_cfg/vtls_cfg_parser.h
 DISTCLEANFILES	+=	vhp_hufdec.h
+
+EXTRA_DIST += \
+	mgt/vtls_cfg/vtls_cfg_lexer.c \
+	mgt/vtls_cfg/vtls_cfg_parser.c \
+	mgt/vtls_cfg/vtls_cfg_parser.h
