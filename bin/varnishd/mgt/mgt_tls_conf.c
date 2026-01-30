@@ -554,13 +554,15 @@ mgt_cert_load_cld(unsigned *status, struct vsb *e_msg,
 
 		AN(cert->id);
 		/*
-		 * CLI: vtls.cld_cert_load <id> <frontend> <protos>
+		 * CLI: vtls.cld_cert_load <id> <frontend> <dh> <protos>
 		 *      <prefer_server_ciphers> <ciphers> <ciphersuites>
 		 *      <is_default> <cert_b64> <privkey_b64>
 		 */
 		VSB_printf(cmd, "\"%s\" ", cert->id);
 		VSB_printf(cmd, "\"%s\" ",
 		    cert->fe != NULL ? cert->fe : "");
+		VSB_printf(cmd, "\"%s\" ",
+		    dh != NULL ? VSB_data(dh) : "");
 		VSB_printf(cmd, "\"%i\" ", cert->protos);
 		VSB_printf(cmd, "\"%i\" ", cert->prefer_server_ciphers);
 		VSB_printf(cmd, "\"%s\" ",

@@ -495,13 +495,13 @@ CLI_CMD(PID,
 
 CLI_CMD(VTLS_CLD_CERT_LOAD,
 	"vtls.cld_cert_load",
-	"vtls.cld_cert_load <id> <frontend> <protos>"
+	"vtls.cld_cert_load <id> <frontend> <dh> <protos>"
 	" <prefer_server_ciphers> <ciphers> <ciphersuites>"
 	" <is_default> <cert> <privkey>",
 	"Private interface. Load certificate data (base64 encoded).",
 	"",
 	CLI_F_INTERNAL|CLI_F_SENSITIVE,
-	9, 9
+	10, 10
 )
 
 CLI_CMD(VTLS_CLD_CERT_COMMIT,

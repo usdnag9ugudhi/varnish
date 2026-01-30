@@ -33,6 +33,7 @@
 
 #include "config.h"
 
+#include <openssl/dh.h>
 #include <openssl/ssl.h>
 #include <openssl/tls1.h>
 #include <openssl/x509.h>
@@ -924,6 +925,77 @@ pass_cb(char *buf, int size, int rwflag, void *priv)
 }
 
 /*
+ * Set DH parameters on SSL_CTX.
+ * If dh/dhlen is provided, use that; otherwise try to read from src BIO.
+ * Returns 0 on success, -1 on error.
+ *
+ * Note: The DH API is deprecated in OpenSSL 3.0 but still functional.
+ * We suppress deprecation warnings for this function.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+static int
+vtls_set_dh(struct cli *cli, struct vtls_ctx *vc, BIO *src,
+    const char *dh, int dhlen)
+{
+	char errbuf[256];
+	BIO *dh_src = NULL;
+	DH *dhparam;
+	unsigned long e;
+	int err;
+
+	CHECK_OBJ_NOTNULL(vc, VTLS_CTX_MAGIC);
+
+	if (dhlen > 0) {
+		AN(dh);
+		dh_src = BIO_new_mem_buf(TRUST_ME(dh), dhlen);
+		if (dh_src == NULL) {
+			VCLI_Out(cli, "Error in BIO_new_mem_buf for DH\n");
+			return (-1);
+		}
+	}
+
+	if (dh_src != NULL) {
+		dhparam = PEM_read_bio_DHparams(dh_src, NULL, pass_cb, NULL);
+		BIO_free(dh_src);
+		if (dhparam == NULL) {
+			VCLI_Out(cli, "Error: dhparams: "
+			    "No DH parameters found\n");
+			while ((e = ERR_get_error())) {
+				ERR_error_string_n(e, errbuf, sizeof errbuf);
+				VCLI_Out(cli, "%s\n", errbuf);
+			}
+			return (-1);
+		}
+	} else {
+		/* Try to read DH params from the certificate PEM */
+		dhparam = PEM_read_bio_DHparams(src, NULL, pass_cb, NULL);
+	}
+
+	if (dhparam == NULL)
+		return (0);  /* No DH params is not an error */
+
+	err = SSL_CTX_set_tmp_dh(vc->ctx, dhparam);
+	DH_free(dhparam);
+
+	if (err != 1) {
+		VCLI_Out(cli, "Failed to set DHparam\n");
+		while ((e = ERR_get_error())) {
+			ERR_error_string_n(e, errbuf, sizeof errbuf);
+			VCLI_Out(cli, "%s\n", errbuf);
+		}
+		return (-1);
+	}
+
+	return (0);
+}
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
+/*
  * Create SSL_CTX from PEM data in memory.
  * If key/key_len is provided, use that for the private key.
  * Otherwise try to find the private key in the cert PEM.
@@ -932,6 +1004,7 @@ pass_cb(char *buf, int size, int rwflag, void *priv)
 static struct vtls_ctx *
 vtls_ctx_new_from_pem(struct cli *cli, const char *name_id,
     const char *pem, int pem_len, const char *key, int key_len,
+    const char *dh, int dh_len,
     int protos, int prefer_server_ciphers,
     const char *ciphers, const char *ciphersuites, X509 **px509)
 {
@@ -1095,7 +1168,6 @@ vtls_ctx_new_from_pem(struct cli *cli, const char *name_id,
 	}
 
 	EVP_PKEY_free(pkey);
-	BIO_free(src);
 
 	/* Verify key matches certificate */
 	if (SSL_CTX_check_private_key(vc->ctx) != 1) {
@@ -1104,9 +1176,20 @@ vtls_ctx_new_from_pem(struct cli *cli, const char *name_id,
 			VCLI_Out(cli, "Private key mismatch: %s\n", errbuf);
 		}
 		X509_free(x509);
+		BIO_free(src);
 		vtls_ctx_free(vc);
 		return (NULL);
 	}
+
+	/* Set DH parameters */
+	BIO_reset(src);
+	if (vtls_set_dh(cli, vc, src, dh, dh_len) != 0) {
+		X509_free(x509);
+		BIO_free(src);
+		vtls_ctx_free(vc);
+		return (NULL);
+	}
+	BIO_free(src);
 
 	/* Set up callbacks */
 	if (!SSL_CTX_set_tlsext_servername_callback(vc->ctx, vtls_sni_cb)) {
@@ -1138,10 +1221,10 @@ vtls_cli_cert_load(struct cli *cli, const char *const *av, void *priv)
 	struct listen_sock *ls;
 	struct vtls_ctx *vc;
 	const char *id, *fe, *ciphers, *ciphersuites;
-	const char *cert_b64, *privkey_b64;
+	const char *cert_b64, *privkey_b64, *dh_b64;
 	int protos, prefer_server_ciphers, is_default;
-	char *cert, *privkey;
-	int cert_len, privkey_len;
+	char *cert, *privkey, *dh;
+	int cert_len, privkey_len, dh_len;
 	X509 *x509 = NULL;
 
 	(void)priv;
@@ -1149,26 +1232,28 @@ vtls_cli_cert_load(struct cli *cli, const char *const *av, void *priv)
 	/* Parse arguments:
 	 * av[2] = id
 	 * av[3] = frontend (empty string for global)
-	 * av[4] = protos
-	 * av[5] = prefer_server_ciphers
-	 * av[6] = ciphers
-	 * av[7] = ciphersuites
-	 * av[8] = is_default
-	 * av[9] = cert_b64 (base64-encoded certificate)
-	 * av[10] = privkey_b64 (base64-encoded private key, or empty)
+	 * av[4] = dh_b64 (base64-encoded DH params, or empty)
+	 * av[5] = protos
+	 * av[6] = prefer_server_ciphers
+	 * av[7] = ciphers
+	 * av[8] = ciphersuites
+	 * av[9] = is_default
+	 * av[10] = cert_b64 (base64-encoded certificate)
+	 * av[11] = privkey_b64 (base64-encoded private key, or empty)
 	 */
 	AN(av[2]); AN(av[3]); AN(av[4]); AN(av[5]); AN(av[6]);
-	AN(av[7]); AN(av[8]); AN(av[9]); AN(av[10]);
+	AN(av[7]); AN(av[8]); AN(av[9]); AN(av[10]); AN(av[11]);
 
 	id = av[2];
 	fe = av[3];
-	protos = atoi(av[4]);
-	prefer_server_ciphers = atoi(av[5]);
-	ciphers = av[6];
-	ciphersuites = av[7];
-	is_default = atoi(av[8]);
-	cert_b64 = av[9];
-	privkey_b64 = av[10];
+	dh_b64 = av[4];
+	protos = atoi(av[5]);
+	prefer_server_ciphers = atoi(av[6]);
+	ciphers = av[7];
+	ciphersuites = av[8];
+	is_default = atoi(av[9]);
+	cert_b64 = av[10];
+	privkey_b64 = av[11];
 
 	/* Find target vtls struct */
 	if (*fe != '\0') {
@@ -1196,12 +1281,25 @@ vtls_cli_cert_load(struct cli *cli, const char *const *av, void *priv)
 	if (vtls->sni_scratch == NULL)
 		vtls->sni_scratch = vtls_sni_map_new();
 
+	/* Decode DH data if provided */
+	dh = NULL;
+	dh_len = 0;
+	if (*dh_b64 != '\0') {
+		dh = vtls_cli_base64_decode(dh_b64, &dh_len);
+		if (dh == NULL) {
+			VCLI_Out(cli, "Failed to decode DH data\n");
+			VCLI_SetResult(cli, CLIS_CANT);
+			return;
+		}
+	}
+
 	/* Decode certificate data */
 	cert = vtls_cli_base64_decode(cert_b64, &cert_len);
 	if (cert == NULL || cert_len == 0) {
 		VCLI_Out(cli, "Failed to decode certificate data\n");
 		VCLI_SetResult(cli, CLIS_CANT);
 		free(cert);
+		free(dh);
 		return;
 	}
 
@@ -1214,13 +1312,15 @@ vtls_cli_cert_load(struct cli *cli, const char *const *av, void *priv)
 			VCLI_Out(cli, "Failed to decode private key data\n");
 			VCLI_SetResult(cli, CLIS_CANT);
 			free(cert);
+			free(dh);
 			return;
 		}
 	}
 
 	/* Create SSL_CTX and get X509 for hostname extraction */
 	vc = vtls_ctx_new_from_pem(cli, id, cert, cert_len, privkey, privkey_len,
-	    protos, prefer_server_ciphers, ciphers, ciphersuites, &x509);
+	    dh, dh_len, protos, prefer_server_ciphers, ciphers, ciphersuites,
+	    &x509);
 
 	/* Clear sensitive data from memory */
 	ZERO_OBJ(cert, cert_len);
@@ -1228,6 +1328,10 @@ vtls_cli_cert_load(struct cli *cli, const char *const *av, void *priv)
 	if (privkey != NULL) {
 		ZERO_OBJ(privkey, privkey_len);
 		free(privkey);
+	}
+	if (dh != NULL) {
+		ZERO_OBJ(dh, dh_len);
+		free(dh);
 	}
 
 	if (vc == NULL) {

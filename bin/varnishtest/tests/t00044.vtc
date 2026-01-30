@@ -1,0 +1,40 @@
+varnishtest "Test DH parameter support"
+
+# Ported from Varnish Enterprise
+
+feature tls
+
+server s1 {
+	rxreq
+	txresp
+} -start
+
+# Test DH parameters via config file (dhparam inside pem-file block)
+shell {
+	cat >${tmpdir}/vtls.cfg <<-EOF
+	frontend = {
+		host = "127.0.0.1"
+		port = "0"
+		pem-file = {
+			cert = "${topsrc}/etc/ca/bundle/example.com.pem"
+			dhparam = "${topsrc}/etc/ca/dh3072.pem"
+		}
+	}
+	EOF
+}
+
+varnish v1 -arg "-A ${tmpdir}/vtls.cfg" -vcl+backend {} -start
+
+client c1 {
+	tls_config {
+		servername = example.com
+	}
+	tls_handshake
+	expect tls.failed == false
+	txreq
+	rxresp
+	expect resp.status == 200
+} -run
+
+# Verify connection completed
+varnish v1 -cliok "tls.cert.list"
