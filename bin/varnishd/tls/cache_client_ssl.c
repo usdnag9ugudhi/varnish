@@ -362,7 +362,7 @@ vtls_load_x509_names(struct cli *cli, struct vtls *vtls,
 {
 	STACK_OF(GENERAL_NAME) *names;
 	char *p;
-	int i, nb = 0;
+	int i, nb = 0, nf = 0, err = 0;
 
 	CHECK_OBJ_NOTNULL(vtls, VTLS_MAGIC);
 	CHECK_OBJ_NOTNULL(vc, VTLS_CTX_MAGIC);
@@ -392,13 +392,24 @@ vtls_load_x509_names(struct cli *cli, struct vtls *vtls,
 		}
 	}
 
+/*
+ * nb = number of names added to SNI map
+ * nf = number of names found in certificate (including duplicates)
+ * err = number of duplicate errors (when tls_err_dup_servername is set)
+ */
 #define ADD_TO_SNI(name)						\
 do {									\
-	if (vtls_sni_exists(vtls->sni, name)) {				\
-		/* Already in active map - that's OK */			\
-	}								\
-	if (vtls_sni_exists(vtls->sni_scratch, name)) {			\
-		/* Already in scratch - skip duplicate */		\
+	nf++;								\
+	if (cache_param->tls_err_dup_servername &&			\
+	    vtls_sni_exists(vtls->sni, name)) {				\
+		VCLI_Out(cli, "'%s' already loaded.\n", name);		\
+		err++;							\
+	} else if (cache_param->tls_err_dup_servername &&		\
+	    vtls_sni_exists(vtls->sni_scratch, name)) {			\
+		VCLI_Out(cli, "'%s' already staged.\n", name);		\
+		err++;							\
+	} else if (vtls_sni_exists(vtls->sni_scratch, name)) {		\
+		/* Duplicate in scratch, silently skip */		\
 	} else {							\
 		AZ(vtls_sni_map_add(vtls->sni_scratch, name, vc));	\
 		nb++;							\
@@ -447,11 +458,15 @@ do {									\
 	}
 #undef ADD_TO_SNI
 
-	if (nb == 0) {
+	if (err > 0)
+		return (-1);
+
+	if (nf == 0) {
 		VCLI_Out(cli, "Could not find valid SAN or CN in certificate\n");
 		return (-1);
 	}
 
+	(void)nb;  /* nb may be 0 if all names were duplicates - that's OK */
 	return (0);
 }
 

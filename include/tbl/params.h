@@ -1126,6 +1126,20 @@ PARAM_SIMPLE(
 )
 
 PARAM_SIMPLE(
+	/* name */	tls_err_dup_servername,
+	/* type */	boolean,
+	/* min */	NULL,
+	/* max */	NULL,
+	/* def */	"off",
+	/* units */	"bool",
+	/* descr */
+	"When enabled, adding a certificate with an SNI hostname that matches "
+	"an already loaded certificate results in an error. By default, "
+	"duplicate hostnames are silently ignored and the first certificate "
+	"loaded for a given hostname is used."
+)
+
+PARAM_SIMPLE(
 	/* name */	transit_buffer,
 	/* type */	bytes,
 	/* min */	"0k",

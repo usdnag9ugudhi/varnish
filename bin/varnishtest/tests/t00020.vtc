@@ -1,0 +1,46 @@
+varnishtest "Test tls_err_dup_servername parameter"
+
+# Test that tls_err_dup_servername causes error on duplicate hostnames
+
+feature tls
+
+server s1 {
+	rxreq
+	txresp
+} -start
+
+shell {
+cat >${tmpdir}/vtls.cfg <<EOF
+  frontend = {
+      host = "${localhost}"
+      port = "0"
+  }
+EOF
+}
+
+varnish v1 -arg "-A ${tmpdir}/vtls.cfg" -vcl+backend {} -start
+
+# Default behavior: duplicate hostnames are silently ignored
+varnish v1 -cliok "tls.cert.load cert1 ${topsrc}/etc/ca/bundle/no-san.example.com.pem"
+varnish v1 -cliok "tls.cert.load cert2 ${topsrc}/etc/ca/bundle/no-san.example.com.pem"
+varnish v1 -cliok "tls.cert.rollback"
+
+# Enable tls_err_dup_servername
+varnish v1 -cliok "param.set tls_err_dup_servername on"
+
+# First load should succeed
+varnish v1 -cliok "tls.cert.load cert1 ${topsrc}/etc/ca/bundle/no-san.example.com.pem"
+
+# Second load with same hostname should fail
+varnish v1 -clierr 300 "tls.cert.load cert2 ${topsrc}/etc/ca/bundle/no-san.example.com.pem"
+
+# Rollback to clean state
+varnish v1 -cliok "tls.cert.rollback"
+
+# Disable the parameter
+varnish v1 -cliok "param.set tls_err_dup_servername off"
+
+# Now duplicates should be allowed again
+varnish v1 -cliok "tls.cert.load cert1 ${topsrc}/etc/ca/bundle/no-san.example.com.pem"
+varnish v1 -cliok "tls.cert.load cert2 ${topsrc}/etc/ca/bundle/no-san.example.com.pem"
+varnish v1 -cliok "tls.cert.commit"
