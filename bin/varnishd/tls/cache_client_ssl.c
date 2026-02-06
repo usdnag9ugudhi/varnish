@@ -1033,6 +1033,14 @@ vtls_ctx_new_from_pem(struct cli *cli, const char *name_id,
 		return (NULL);
 	}
 
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+	/*
+	 * Many clients close TCP without TLS close_notify.
+	 * Treat unexpected EOF as clean shutdown (OpenSSL 3.0+).
+	 */
+	(void)SSL_CTX_set_options(vc->ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
+
 	/* Set session id context */
 	AN(SSL_CTX_set_session_id_context(vc->ctx,
 	    (const unsigned char *)"varnishd", strlen("varnishd")));
