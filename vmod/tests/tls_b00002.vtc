@@ -1,0 +1,54 @@
+varnishtest "Test vmod-tls in vcl_pipe"
+
+# Ported from Varnish Enterprise vmodtests/tls/test04.vtc
+
+shell {
+cat >vtls.cfg <<EOF
+  frontend = {
+      host = "${localhost}"
+      port = "0"
+  }
+
+  pem-file = "${topsrc}/etc/ca/bundle/example.com.pem"
+EOF
+}
+
+server s1 {
+	rxreq
+	expect req.http.is-tls == "true"
+	expect req.http.version ~ "TLSv1."
+	expect req.http.cipher != ""
+	expect req.http.authority == "foobar"
+	expect req.http.alpn == ""
+	expect req.http.cert-sign ~ "SHA256"
+	expect req.http.cert-key == "RSA2048"
+	txresp
+} -start
+
+varnish v1 -arg "-A ${tmpdir}/vtls.cfg" -vcl+backend {
+	import tls;
+
+	sub vcl_recv {
+		return (pipe);
+	}
+
+	sub vcl_pipe {
+		set bereq.http.is-tls = tls.is_tls();
+		set bereq.http.version = tls.version();
+		set bereq.http.cipher = tls.cipher();
+		set bereq.http.authority = tls.authority();
+		set bereq.http.alpn = tls.alpn();
+		set bereq.http.cert-sign = tls.cert_sign();
+		set bereq.http.cert-key = tls.cert_key();
+		return (pipe);
+	}
+} -start
+
+client c1 {
+	tls_config {
+		servername = foobar
+	}
+	tls_handshake
+	txreq
+	rxresp
+} -run

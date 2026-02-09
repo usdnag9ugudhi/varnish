@@ -47,6 +47,7 @@
 #include "cache/cache_pool.h"
 #include "vcli_serve.h"
 #include "cache_tls.h"
+
 #include "cache/cache_transport.h"
 #include "common/heritage.h"
 
@@ -628,123 +629,6 @@ struct transport TLS_transport = {
 	.magic =		TRANSPORT_MAGIC,
 	.new_session =		vtls_new_session
 };
-
-/* Client-side TLS VCO */
-static ssize_t v_matchproto_(vco_read_f)
-vtls_read_client(void *priv, int fd, void *buf, size_t len)
-{
-	struct vtls_sess *tsp;
-	int i, e;
-
-	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
-	AN(tsp->ssl);
-	assert(fd == SSL_get_fd(tsp->ssl));
-
-	if (len > INT_MAX)
-		len = INT_MAX;
-	i = SSL_read(tsp->ssl, buf, len);
-	e = SSL_get_error(tsp->ssl, i);
-	if (i <= 0 && e != SSL_ERROR_ZERO_RETURN)
-		VTLS_vsl_sslerr(tsp->log, tsp->ssl, i);
-	VTLS_vsl_ssllog(tsp->log);
-	return (i);
-}
-
-static ssize_t v_matchproto_(vco_write_f)
-vtls_write_client(void *priv, int fd, const void *buf, size_t len)
-{
-	struct vtls_sess *tsp;
-	int i;
-
-	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
-	AN(tsp->ssl);
-	assert(fd == SSL_get_fd(tsp->ssl));
-
-	if (len > INT_MAX)
-		len = INT_MAX;
-	i = SSL_write(tsp->ssl, buf, len);
-	if (i <= 0)
-		VTLS_vsl_sslerr(tsp->log, tsp->ssl, i);
-	VTLS_vsl_ssllog(tsp->log);
-	return (i);
-}
-
-static ssize_t v_matchproto_(vco_writev_f)
-vtls_writev_client(void *priv, int fd, const struct iovec *iov, int iovcnt)
-{
-	struct vtls_sess *tsp;
-	int i;
-
-	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
-	AN(tsp->ssl);
-	assert(fd == SSL_get_fd(tsp->ssl));
-
-	if (iovcnt == 0)
-		return (0);
-
-	AN(iov);
-	i = iov[0].iov_len;
-	if (i > INT_MAX)
-		i = INT_MAX;
-	i = SSL_write(tsp->ssl, iov[0].iov_base, i);
-	if (i <= 0)
-		VTLS_vsl_sslerr(tsp->log, tsp->ssl, i);
-	VTLS_vsl_ssllog(tsp->log);
-	return (i);
-}
-
-static int v_matchproto_(vco_check_f)
-vtls_check_client(ssize_t a)
-{
-	(void)a;
-	return (1);
-}
-
-static const struct vco vtls_oper_client = {
-	.read = vtls_read_client,
-	.write = vtls_write_client,
-	.writev_prep = NULL,
-	.writev = vtls_writev_client,
-	.nb_read = NULL,
-	.nb_writev = NULL,
-	.check = vtls_check_client,
-};
-
-const struct vco *
-VTLS_conn_oper_client(struct vtls_sess *tsp, void **ppriv)
-{
-	CHECK_OBJ_NOTNULL(tsp, VTLS_SESS_MAGIC);
-	AN(ppriv);
-	*ppriv = tsp;
-	return (&vtls_oper_client);
-}
-
-/* Buffer management */
-struct vtls_buf *
-VTLS_buf_alloc(struct mempool *mpl_ssl)
-{
-	struct vtls_buf *buf;
-	unsigned buflen = 16384;
-
-	buf = MPL_Get(mpl_ssl, NULL);
-	if (buf == NULL)
-		return (NULL);
-
-	INIT_OBJ(buf, VTLS_BUF_MAGIC);
-	buf->buflen = buflen;
-	buf->pool = mpl_ssl;
-	return (buf);
-}
-
-void
-VTLS_buf_free(struct vtls_buf **pbuf)
-{
-	struct vtls_buf *buf;
-
-	AN(pbuf);
-	TAKE_OBJ_NOTNULL(buf, pbuf, VTLS_BUF_MAGIC);
-	MPL_Free(buf->pool, buf);
-}
 
 /*
  * Base64 decode PEM data received from manager

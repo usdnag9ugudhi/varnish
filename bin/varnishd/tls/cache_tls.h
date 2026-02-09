@@ -94,6 +94,9 @@ const struct vco *VTLS_conn_oper_backend(struct vtls_sess *tsp, void **ppriv);
 /* TLS VCO provider for client connections */
 const struct vco *VTLS_conn_oper_client(struct vtls_sess *tsp, void **ppriv);
 
+/* Initialize TLS buffer pool for a worker pool */
+void VTLS_NewPool(struct pool *pp, unsigned pool_no);
+
 /* Logging helpers */
 void VTLS_flush_errors(void);
 void VTLS_vsl_ssllog(struct vtls_log *log);
@@ -105,6 +108,7 @@ int VTLS_do_handshake(struct vtls_sess *tsp, int fd, double tmo);
 /* TLS buffer management */
 struct vtls_buf *VTLS_buf_alloc(struct mempool *mpl_ssl);
 void VTLS_buf_free(struct vtls_buf **pbuf);
+void VTLS_buf_release(struct vtls_sess *tsp);
 
 /* Client-side TLS session management */
 void VTLS_del_sess(struct pool *pp, struct vtls_sess **ptsp);

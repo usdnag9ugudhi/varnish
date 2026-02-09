@@ -39,6 +39,7 @@
 #include "cache/cache_transport.h"
 #include "http2/cache_http2.h"
 
+#include "tls/cache_tls.h"
 #include "vend.h"
 #include "vtcp.h"
 
@@ -426,6 +427,9 @@ h2_new_session(struct worker *wrk, void *arg)
 	if (sp->tls != NULL) {
 		/* Hand the TLS bits a relevant VSL to write to */
 		VTLS_vsl_set(sp->tls, h2->vsl);
+
+		/* Release the writev-buffer if we are holding it */
+		VTLS_buf_release(sp->tls);
 	}
 
 	if (marker == H2_OU_MARKER) {

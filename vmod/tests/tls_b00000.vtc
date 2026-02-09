@@ -1,0 +1,51 @@
+varnishtest "vmod-tls basic functions"
+
+# Ported from Varnish Enterprise vmodtests/tls/test01.vtc
+
+shell {
+cat >vtls.cfg <<EOF
+  frontend = {
+      host = "${localhost}"
+      port = "0"
+  }
+
+  pem-file = "${topsrc}/etc/ca/bundle/example.com.pem"
+EOF
+}
+
+varnish v1 -arg "-A ${tmpdir}/vtls.cfg" -vcl {
+	import tls;
+
+	backend default none;
+
+	sub vcl_recv {
+		return (synth(200));
+	}
+
+	sub vcl_synth {
+		set resp.http.is-tls = tls.is_tls();
+		set resp.http.version = tls.version();
+		set resp.http.cipher = tls.cipher();
+		set resp.http.authority = tls.authority();
+		set resp.http.alpn = tls.alpn();
+		set resp.http.cert-sign = tls.cert_sign();
+		set resp.http.cert-key = tls.cert_key();
+		return (deliver);
+	}
+} -start
+
+client c1 {
+	tls_config {
+		servername = example.com
+	}
+	tls_handshake
+	txreq
+	rxresp
+	expect resp.http.is-tls == "true"
+	expect resp.http.version ~ "TLSv1."
+	expect resp.http.cipher != ""
+	expect resp.http.authority == "example.com"
+	expect resp.http.alpn == ""
+	expect resp.http.cert-sign ~ "SHA256"
+	expect resp.http.cert-key == "RSA2048"
+} -run

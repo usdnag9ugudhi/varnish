@@ -44,6 +44,7 @@
 #include "cache_transport.h"
 
 #include "common/heritage.h"
+#include "tls/cache_tls.h"
 #include "vtim.h"
 
 void
@@ -181,8 +182,13 @@ Req_New(struct sess *sp, const struct req *preq)
 	req->htc = (void*)p;
 	INIT_OBJ(req->htc, HTTP_CONN_MAGIC);
 	req->htc->doclose = SC_NULL;
-	req->htc->oper = VCO_default;
-	req->htc->oper_priv = NULL;
+	if (sp->tls != NULL)
+		req->htc->oper =
+		    VTLS_conn_oper_client(sp->tls, &req->htc->oper_priv);
+	else {
+		req->htc->oper = VCO_default;
+		req->htc->oper_priv = NULL;
+	}
 	p = (void*)PRNDUP(p + sizeof(*req->htc));
 
 	if (UNLIKELY(preq != NULL))

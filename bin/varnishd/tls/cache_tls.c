@@ -43,9 +43,64 @@
 
 #include "cache/cache_varnishd.h"
 #include "cache/cache_conn_oper.h"
+#include "cache/cache_pool.h"
 #include "cache_tls.h"
 
 #include "vtim.h"
+
+/* Maximum TLS record payload size (16KB) */
+#define TLS_MAX_RECLEN			(16 * 1024)
+
+/* Initialize TLS buffer pool for a worker pool */
+void
+VTLS_NewPool(struct pool *pp, unsigned pool_no)
+{
+	char nb[12];
+
+	CHECK_OBJ_NOTNULL(pp, POOL_MAGIC);
+	bprintf(nb, "ssl_buf%u", pool_no);
+	pp->mpl_ssl = MPL_New(nb, &cache_param->sslbuf_pool,
+	    &cache_param->ssl_buffer);
+	AN(pp->mpl_ssl);
+}
+
+struct vtls_buf *
+VTLS_buf_alloc(struct mempool *mpl_ssl)
+{
+	struct vtls_buf *buf;
+	unsigned sz;
+
+	buf = MPL_Get(mpl_ssl, &sz);
+	if (buf == NULL)
+		return (NULL);
+
+	INIT_OBJ(buf, VTLS_BUF_MAGIC);
+	buf->buflen = sz;
+	buf->pool = mpl_ssl;
+	return (buf);
+}
+
+void
+VTLS_buf_free(struct vtls_buf **pbuf)
+{
+	struct vtls_buf *buf;
+
+	AN(pbuf);
+	TAKE_OBJ_NOTNULL(buf, pbuf, VTLS_BUF_MAGIC);
+	MPL_Free(buf->pool, buf);
+}
+
+void
+VTLS_buf_release(struct vtls_sess *tsp)
+{
+	/* Release our buf if we hold one. */
+
+	CHECK_OBJ_NOTNULL(tsp, VTLS_SESS_MAGIC);
+	if (tsp->buf == NULL)
+		return;
+	VTLS_buf_free(&tsp->buf);
+	AZ(tsp->buf);
+}
 
 /* Flush OpenSSL's per thread ERR messages if any to free them. */
 void
@@ -140,29 +195,101 @@ vtls_write(void *priv, int fd, const void *buf, size_t len)
 	return (i);
 }
 
-static ssize_t v_matchproto_(vco_writev_f)
-vtls_writev(void *priv, int fd, const struct iovec *iov, int iovcnt)
+static ssize_t v_matchproto_(vco_read_f)
+vtls_read_client(void *priv, int fd, void *buf, size_t len)
 {
 	struct vtls_sess *tsp;
-	int i;
+	int i, e;
 
 	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
 	AN(tsp->ssl);
 	assert(fd == SSL_get_fd(tsp->ssl));
 
+	if (len > INT_MAX)
+		len = INT_MAX;
+	errno = 0;
+	i = SSL_read(tsp->ssl, buf, len);
+	e = SSL_get_error(tsp->ssl, i);
+
+	if (i < 0 && e == SSL_ERROR_WANT_READ)
+		i = -2;
+	else if (i < 0 && (e == SSL_ERROR_SYSCALL &&
+	    (errno == EAGAIN || errno == EWOULDBLOCK)))
+		i = -2;
+	if (i <= 0 && (!(e == SSL_ERROR_SYSCALL && errno == 0)
+	    && e != SSL_ERROR_ZERO_RETURN))
+		VTLS_vsl_sslerr(tsp->log, tsp->ssl, i);
+
+	VTLS_vsl_ssllog(tsp->log);
+	return (i);
+}
+
+static void v_matchproto_(vco_writev_prep_f)
+vtls_writev_prep(void *priv, struct worker *wrk)
+{
+	/* Acquire a buf if we don't already hold one. */
+
+	struct vtls_sess *tsp;
+
+	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
+	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
+
+	CHECK_OBJ_ORNULL(tsp->buf, VTLS_BUF_MAGIC);
+	if (tsp->buf != NULL)
+		return;
+
+	CHECK_OBJ_NOTNULL(wrk->pool, POOL_MAGIC);
+	tsp->buf = VTLS_buf_alloc(wrk->pool->mpl_ssl);
+	AN(tsp->buf);
+}
+
+static ssize_t v_matchproto_(vco_writev_f)
+vtls_writev(void *priv, int fd, const struct iovec *iov, int iovcnt)
+{
+	struct vtls_sess *tsp;
+	ssize_t l, l2;
+	unsigned buflen;
+	int i;
+	char *p;
+
+	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
+	AN(tsp->ssl);
+	AN(tsp->log->vsl);
+	CHECK_OBJ_NOTNULL(tsp->buf, VTLS_BUF_MAGIC);
+	assert(fd == SSL_get_fd(tsp->ssl));
+
 	if (iovcnt == 0)
 		return (0);
 
-	/*
-	 * OpenSSL does not provide a writev()-like function.
-	 * We just send the first iovec, and let the caller handle
-	 * partial writes by calling us again.
-	 */
-	AN(iov);
-	i = iov[0].iov_len;
-	if (i > INT_MAX)
-		i = INT_MAX;
-	i = SSL_write(tsp->ssl, iov[0].iov_base, i);
+	buflen = tsp->buf->buflen;
+	if (buflen > TLS_MAX_RECLEN) {
+		/* If we go above the maximum TLS record size (and since
+		 * we don't enable SSL_MODE_ENABLE_PARTIAL_WRITE), OpenSSL
+		 * will end up producing and sending a second half empty
+		 * record. Limit the buffer size to avoid this. */
+		buflen = TLS_MAX_RECLEN;
+	}
+	assert(buflen > 0);
+
+	if (iovcnt == 1 || iov[0].iov_len + iov[1].iov_len > buflen) {
+		/* Buffering would not help here */
+		p = iov[0].iov_base;
+		l = iov[0].iov_len;
+	} else {
+		p = tsp->buf->bytes;
+		l = 0;
+		for (i = 0; i < iovcnt && l < buflen; i++) {
+			l2 = iov[i].iov_len;
+			if (l + l2 > buflen)
+				break;
+			memcpy(p + l, iov[i].iov_base, l2);
+			l += l2;
+		}
+	}
+
+	if (l > INT_MAX)
+		l = INT_MAX;
+	i = SSL_write(tsp->ssl, p, l);
 	if (i <= 0)
 		VTLS_vsl_sslerr(tsp->log, tsp->ssl, i);
 	VTLS_vsl_ssllog(tsp->log);
@@ -181,27 +308,153 @@ vtls_check(ssize_t a)
 	return (1);
 }
 
-static const struct vco vtls_oper_backend = {
-	.read = vtls_read_backend,
-	.write = vtls_write,
-	.writev = vtls_writev,
-	.check = vtls_check,
-};
-
-const struct vco *
-VTLS_conn_oper_backend(struct vtls_sess *tsp, void **ppriv)
+/*
+ * Wait for fd to become ready for the given events (POLLIN/POLLOUT),
+ * with a timeout based on deadline.  Returns 0 on success, -1 on error.
+ */
+static int
+vtls_nb_wait(int fd, int events, vtim_real deadline)
 {
-	CHECK_OBJ_NOTNULL(tsp, VTLS_SESS_MAGIC);
-	AN(ppriv);
-	*ppriv = tsp;
-	return (&vtls_oper_backend);
+	struct pollfd pfd[1];
+	int i;
+	vtim_real now;
+
+	assert(fd >= 0);
+	pfd->fd = fd;
+	pfd->events = events;
+
+	do {
+		now = VTIM_real();
+		if (now > deadline) {
+			errno = ETIMEDOUT;
+			return (-1);
+		}
+		i = poll(pfd, 1, (deadline - now) * 1000);
+	} while (i < 0 && errno == EINTR);
+	if (i == 0) {
+		errno = ETIMEDOUT;
+		return (-1);
+	}
+	if (i < 0) {
+		assert(errno != EWOULDBLOCK);
+		return (-1);
+	}
+	if (!(pfd->revents & events)) {
+		errno = EFAULT;
+		return (-1);
+	}
+	return (0);
 }
+
+static ssize_t v_matchproto_(vco_nb_read_f)
+vtls_nb_read(void *priv, int fd, void *p, size_t l, vtim_real deadline)
+{
+	struct vtls_sess *tsp;
+	int i, e;
+
+	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
+	assert(fd == SSL_get_fd(tsp->ssl));
+
+retry:
+	i = SSL_read(tsp->ssl, p, l);
+	VTLS_vsl_ssllog(tsp->log);
+	e = SSL_get_error(tsp->ssl, i);
+	if (e == SSL_ERROR_NONE)
+		return (i);
+	if (e == SSL_ERROR_ZERO_RETURN)
+		return (0);
+	if (e == SSL_ERROR_WANT_READ && errno == EWOULDBLOCK)
+		return (-1);
+	if (e == SSL_ERROR_WANT_WRITE && errno == EWOULDBLOCK) {
+		/* The TLS protocol state requires output bytes before we
+		 * are able to continue. Wait up until deadline for the
+		 * socket to become writable. */
+		if (vtls_nb_wait(fd, POLLOUT, deadline))
+			return (-1);
+		goto retry;
+	}
+	VTLS_vsl_sslerr(tsp->log, tsp->ssl, i);
+	return (-1);
+}
+
+static ssize_t v_matchproto_(vco_nb_write_f)
+vtls_nb_writev(void *priv, int fd, const struct iovec *iov, int n_iov,
+    vtim_real deadline)
+{
+	struct vtls_sess *tsp;
+	int i, e;
+
+	/* Note: OpenSSL does not provide a writev()-like function. We
+	 * "emulate" writev() functionality by just passing in the first
+	 * vector as the argument to SSL_write(). This isn't ideal in the
+	 * case of a tiny vector followed by a large one, which often is
+	 * the case in H2 where this function is used (9 byte header
+	 * followed by a full H2 data frame). Though the only way to
+	 * address that would be to memory copy into a large buffer, which
+	 * likely would be more expensive. */
+
+	CAST_OBJ_NOTNULL(tsp, priv, VTLS_SESS_MAGIC);
+	assert(fd == SSL_get_fd(tsp->ssl));
+	assert(n_iov > 0);
+	AN(iov);
+	assert(iov[0].iov_len > 0);
+
+retry:
+	i = SSL_write(tsp->ssl, iov[0].iov_base, iov[0].iov_len);
+	VTLS_vsl_ssllog(tsp->log);
+	e = SSL_get_error(tsp->ssl, i);
+	if (e == SSL_ERROR_NONE)
+		return (i);
+	if (e == SSL_ERROR_ZERO_RETURN) {
+		/* Presumably this can happen when TLS needs to read and
+		 * the peer has hung up on us. Set an error to adhere to
+		 * the write() like behaviour of this function. */
+		VTLS_LOG(tsp->log, SLT_Error, "SSL_write zero return");
+		errno = EFAULT;
+		return (-1);
+	}
+	if (e == SSL_ERROR_WANT_WRITE && errno == EWOULDBLOCK)
+		return (-1);
+	if (e == SSL_ERROR_WANT_READ && errno == EWOULDBLOCK) {
+		/* The TLS protocol state requires input bytes before we
+		 * are able to continue. Wait up until deadline for the
+		 * socket to become readable. */
+		if (vtls_nb_wait(fd, POLLIN, deadline))
+			return (-1);
+		goto retry;
+	}
+	VTLS_vsl_sslerr(tsp->log, tsp->ssl, i);
+	return (-1);
+}
+
+#define VTLS_OPER(l)						\
+static const struct vco vtls_oper_##l = {			\
+	.read = vtls_read_##l,					\
+	.write = vtls_write,					\
+	.writev_prep = vtls_writev_prep,			\
+	.writev = vtls_writev,					\
+	.nb_read = vtls_nb_read,				\
+	.nb_writev = vtls_nb_writev,				\
+	.check = vtls_check,					\
+};								\
+								\
+const struct vco *						\
+VTLS_conn_oper_##l(struct vtls_sess *tsp, void **ppriv)		\
+{								\
+	CHECK_OBJ_NOTNULL(tsp, VTLS_SESS_MAGIC);		\
+	AN(ppriv);						\
+	*ppriv = tsp;						\
+	return (&vtls_oper_##l);				\
+}
+
+VTLS_OPER(backend)
+VTLS_OPER(client)
 
 /*
  * This is the SSL_do_handshake/poll loop.
  *
  * The SSL object needs to be initialized and configured via
- * SSL_set_connect_state (for client/backend connections).
+ * one of SSL_set_accept_state or SSL_set_connect_state
  */
 int
 VTLS_do_handshake(struct vtls_sess *tsp, int fd, double tmo)

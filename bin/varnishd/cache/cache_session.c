@@ -48,6 +48,7 @@
 #include "cache_conn_oper.h"
 #include "cache_pool.h"
 #include "cache_transport.h"
+#include "tls/cache_tls.h"
 
 #include "vsa.h"
 #include "vtcp.h"
@@ -667,6 +668,9 @@ SES_Delete(struct sess *sp, stream_close_t reason, vtim_real now)
 		now = sp->t_open; /* Do not log negatives */
 	}
 
+	if (sp->tls != NULL)
+		VTLS_del_sess(sp->pool, &sp->tls);
+
 	if (reason == SC_NULL) {
 		assert(sp->fd < 0 && -sp->fd < SCE_MAX);
 		reason = sc_lookup[-sp->fd];
@@ -764,6 +768,8 @@ SES_NewPool(struct pool *pp, unsigned pool_no)
 
 	bprintf(nb, "pool%u", pool_no);
 	pp->waiter = Waiter_New(nb);
+
+	VTLS_NewPool(pp, pool_no);
 }
 
 void
@@ -771,5 +777,6 @@ SES_DestroyPool(struct pool *pp)
 {
 	MPL_Destroy(&pp->mpl_req);
 	MPL_Destroy(&pp->mpl_sess);
+	MPL_Destroy(&pp->mpl_ssl);
 	Waiter_Destroy(&pp->waiter);
 }

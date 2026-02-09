@@ -58,6 +58,7 @@ struct pool {
 
 	struct mempool			*mpl_req;
 	struct mempool			*mpl_sess;
+	struct mempool			*mpl_ssl;
 	struct waiter			*waiter;
 };
 

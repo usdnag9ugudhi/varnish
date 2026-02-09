@@ -1,0 +1,28 @@
+varnishtest "vmod-tls: test that nothing blows up when native TLS is not configured"
+
+# Ported from Varnish Enterprise vmodtests/tls/test03.vtc
+
+server s1 {
+       rxreq
+       txresp
+} -start
+
+varnish v1 -vcl+backend {
+	import tls;
+
+	sub vcl_deliver {
+		set resp.http.is-tls = tls.is_tls();
+		set resp.http.version = tls.version();
+		set resp.http.cipher = tls.cipher();
+		set resp.http.authority = tls.authority();
+		set resp.http.alpn = tls.alpn();
+		set resp.http.cert-sign = tls.cert_sign();
+		set resp.http.cert-key = tls.cert_key();
+	}
+} -start
+
+client c1 {
+	txreq -url "/a"
+	rxresp
+	expect resp.http.is-tls == "false"
+} -run

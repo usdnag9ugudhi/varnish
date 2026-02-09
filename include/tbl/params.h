@@ -1522,6 +1522,22 @@ PARAM_MEMPOOL(
 		"Parameters for backend object fetch memory pool.\n\n"
 )
 
+PARAM_MEMPOOL(
+		/* name */	sslbuf_pool,
+		/* def */	"10,100,10",
+		/* descr */
+		"Parameters for TLS buffer memory pool.\n\n"
+)
+
+PARAM_PRE
+PARAM(bytes_u, ssl_buffer, ssl_buffer, tweak_bytes_u,
+	&mgt_param.ssl_buffer,
+	"256", NULL, "20k", "bytes",
+	"Size of TLS buffer used for combining small writes into "
+	"a single TLS record. Should be at least 16KB for optimal "
+	"TLS record packing.")
+PARAM_POST
+
 /*--------------------------------------------------------------------
  * Thread pool parameters
  */
