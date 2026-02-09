@@ -80,7 +80,7 @@ struct v1l {
  */
 
 struct v1l *
-V1L_Open(struct ws *ws, int *fd, struct vsl_log *vsl,
+V1L_Open(struct worker *wrk, struct ws *ws, int *fd, struct vsl_log *vsl,
     vtim_real deadline, unsigned niov, const struct vco *oper, void *oper_priv)
 {
 	struct v1l *v1l;
@@ -88,6 +88,7 @@ V1L_Open(struct ws *ws, int *fd, struct vsl_log *vsl,
 	uintptr_t ws_snap;
 	size_t sz;
 
+	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 	AN(oper);
 	if (WS_Overflowed(ws))
 		return (NULL);
@@ -129,6 +130,10 @@ V1L_Open(struct ws *ws, int *fd, struct vsl_log *vsl,
 	sz = u * sizeof(struct iovec);
 	assert(sz < UINT_MAX);
 	WS_Release(ws, (unsigned)sz);
+
+	if (oper->writev_prep != NULL)
+		oper->writev_prep(oper_priv, wrk);
+
 	return (v1l);
 }
 

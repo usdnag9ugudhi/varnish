@@ -101,7 +101,7 @@ V1F_SendReq(struct worker *wrk, struct busyobj *bo, uint64_t *ctr_hdrbytes,
 	if (bo->vdp_filter_list != NULL &&
 	    VCL_StackVDP(vdc, bo->vcl, bo->vdp_filter_list, NULL, bo))
 		err = "Failure to push processors";
-	else if ((v1l = V1L_Open(wrk->aws, htc->rfd, bo->vsl, nan(""), 0,
+	else if ((v1l = V1L_Open(wrk, wrk->aws, htc->rfd, bo->vsl, nan(""), 0,
 	    htc->oper, htc->oper_priv)) == NULL) {
 		/*      ^^^^^^^^
 		 * XXX: need a send_timeout for the backend side

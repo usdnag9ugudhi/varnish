@@ -94,7 +94,7 @@ V1D_Deliver(struct req *req, int sendbody)
 
 	CHECK_OBJ_NOTNULL(req->wrk, WORKER_MAGIC);
 
-	v1l = V1L_Open(req->wrk->aws, &req->sp->fd, req->vsl,
+	v1l = V1L_Open(req->wrk, req->wrk->aws, &req->sp->fd, req->vsl,
 	    req->t_prev + SESS_TMO(req->sp, send_timeout),
 	    cache_param->http1_iovs, req->htc->oper, req->htc->oper_priv);
 
