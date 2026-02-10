@@ -54,7 +54,7 @@ VTAILQ_HEAD(memhead_s, memitem);
 struct mempool {
 	unsigned			magic;
 #define MEMPOOL_MAGIC			0x37a75a8d
-	char				name[12];
+	char				name[16];
 	struct memhead_s		list;
 	struct memhead_s		surplus;
 	struct lock			mtx;
