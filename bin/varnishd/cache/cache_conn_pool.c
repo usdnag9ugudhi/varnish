@@ -385,6 +385,9 @@ VCP_Recycle(const struct worker *wrk, struct pfd **pfdp)
 	assert(pfd->state == PFD_STATE_USED);
 	assert(pfd->fd > 0);
 
+	if (pfd->tls != NULL && cp->methods->end != NULL)
+		cp->methods->end(pfd);
+
 	Lck_Lock(&cp->mtx);
 	cp->n_used--;
 
@@ -530,6 +533,9 @@ VCP_Close(struct pfd **pfdp)
 
 	assert(pfd->fd > 0);
 
+	if (pfd->tls != NULL && cp->methods->end != NULL)
+		cp->methods->end(pfd);
+
 	Lck_Lock(&cp->mtx);
 	assert(pfd->state == PFD_STATE_USED || pfd->state == PFD_STATE_STOLEN);
 	cp->n_used--;
@@ -599,6 +605,8 @@ VCP_Get(struct conn_pool *cp, vtim_dur tmo, struct worker *wrk,
 		cp->n_used--;		// Nope, didn't work after all.
 		Lck_Unlock(&cp->mtx);
 	} else {
+		if (pfd->tls != NULL && cp->methods->begin != NULL)
+			cp->methods->begin(pfd, vsl);
 		pfd->created = VTIM_mono();
 		VSC_C_main->backend_conn++;
 	}
