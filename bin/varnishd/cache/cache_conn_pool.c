@@ -82,7 +82,7 @@ struct pfd {
 typedef int cp_open_f(const struct conn_pool *, vtim_dur tmo, VCL_IP *ap,
     struct vsl_log *vsl, struct vtls_sess **ptsp);
 typedef void cp_close_f(struct pfd *);
-typedef void cp_begin_f(struct pfd *, struct vsl_log *);
+typedef void cp_begin_f(struct pool *, struct pfd *, struct vsl_log *);
 typedef void cp_end_f(struct pfd *);
 typedef const struct vco *cp_oper_f(struct pfd *, void **);
 typedef void cp_name_f(const struct pfd *, char *, unsigned, char *, unsigned);
@@ -589,7 +589,7 @@ VCP_Get(struct conn_pool *cp, vtim_dur tmo, struct worker *wrk,
 
 	if (pfd != NULL) {
 		if (pfd->tls != NULL && cp->methods->begin != NULL)
-			cp->methods->begin(pfd, vsl);
+			cp->methods->begin(wrk->pool, pfd, vsl);
 		return (pfd);
 	}
 
@@ -606,7 +606,7 @@ VCP_Get(struct conn_pool *cp, vtim_dur tmo, struct worker *wrk,
 		Lck_Unlock(&cp->mtx);
 	} else {
 		if (pfd->tls != NULL && cp->methods->begin != NULL)
-			cp->methods->begin(pfd, vsl);
+			cp->methods->begin(wrk->pool, pfd, vsl);
 		pfd->created = VTIM_mono();
 		VSC_C_main->backend_conn++;
 	}
@@ -904,10 +904,11 @@ vtp_bssl_close(struct pfd *pfd)
 }
 
 static void v_matchproto_(cp_begin_f)
-vtp_bssl_begin(struct pfd *pfd, struct vsl_log *vsl)
+vtp_bssl_begin(struct pool *pp, struct pfd *pfd, struct vsl_log *vsl)
 {
+	CHECK_OBJ_NOTNULL(pp, POOL_MAGIC);
 	CHECK_OBJ_NOTNULL(pfd, PFD_MAGIC);
-	bssl_vtp_begin(pfd->tls, vsl);
+	bssl_vtp_begin(pp, pfd->tls, vsl);
 }
 
 static void v_matchproto_(cp_end_f)

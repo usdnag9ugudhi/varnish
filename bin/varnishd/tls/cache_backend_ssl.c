@@ -38,6 +38,7 @@
 
 #include "cache/cache_varnishd.h"
 #include "cache/cache_conn_pool_ssl.h"
+#include "cache/cache_pool.h"
 #include "cache_tls.h"
 
 #include "vtcp.h"
@@ -80,6 +81,7 @@ bssl_vtp_free(struct vtls_sess **p_tsp)
 	struct vtls_sess *tsp;
 
 	TAKE_OBJ_NOTNULL(tsp, p_tsp, VTLS_SESS_MAGIC);
+	AZ(tsp->buf);
 	if (tsp->ssl)
 		SSL_free(tsp->ssl);
 	FREE_OBJ(tsp);
@@ -194,10 +196,14 @@ bssl_vtp_fini(struct vtls_sess **ptsp)
 }
 
 void
-bssl_vtp_begin(struct vtls_sess *tsp, struct vsl_log *vsl)
+bssl_vtp_begin(struct pool *pp, struct vtls_sess *tsp, struct vsl_log *vsl)
 {
 	CHECK_OBJ_NOTNULL(bssl_ctx, BSSL_CTX_MAGIC);
+	CHECK_OBJ_NOTNULL(pp, POOL_MAGIC);
 	CHECK_OBJ_NOTNULL(tsp, VTLS_SESS_MAGIC);
+	AZ(tsp->buf);
+	tsp->buf = VTLS_buf_alloc(pp->mpl_ssl);
+	AN(tsp->buf);
 	AZ(tsp->log->vsl);
 	tsp->log->vsl = vsl;
 }
@@ -207,5 +213,8 @@ bssl_vtp_end(struct vtls_sess *tsp)
 {
 	CHECK_OBJ_NOTNULL(bssl_ctx, BSSL_CTX_MAGIC);
 	CHECK_OBJ_NOTNULL(tsp, VTLS_SESS_MAGIC);
+	AN(tsp->buf);
+	VTLS_buf_free(&tsp->buf);
+	AZ(tsp->buf);
 	tsp->log->vsl = NULL;
 }
