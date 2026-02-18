@@ -97,7 +97,7 @@ jobs:
             - tools/*.suppr
             - .circleci
   tar_pkg_tools:
-    description: Builds archives with the packaging tools from https://github.com/varnishcache/pkg-varnish-cache
+    description: Builds archives with the packaging tools from https://code.vinyl-cache.org/vinyl-cache/pkg-vinyl-cache
     docker:
       - image: fedora:latest
     steps:
@@ -111,7 +111,7 @@ jobs:
             mkdir -p ~/.ssh
             ssh-keyscan -H github.com >> ~/.ssh/known_hosts
             echo ${CIRCLE_REPOSITORY_URL}
-            git clone --recursive https://github.com/varnishcache/pkg-varnish-cache.git .
+            git clone --recursive https://code.vinyl-cache.org/vinyl-cache/pkg-vinyl-cache.git .
             git checkout << pipeline.parameters.pkg-commit >>
             tar cvzf debian.tar.gz debian --dereference
             tar cvzf redhat.tar.gz redhat --dereference

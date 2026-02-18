@@ -94,5 +94,5 @@ images that extend the current ones and pre-installs the required
 dependencies.
 
 .. _CircleCI: https://app.circleci.com/pipelines/github/varnishcache/varnish-cache
-.. _pkg-varnish-cache: https://github.com/varnishcache/pkg-varnish-cache
+.. _pkg-varnish-cache: https://code.vinyl-cache.org/vinyl-cache/pkg-vinyl-cache
 .. _PackageCloud: https://packagecloud.io/varnishcache/
