@@ -258,6 +258,28 @@ iovec_collect(struct iovec *buf, struct iovec *out, size_t l)
 }
 
 /*
+ * take at most bytes from the in viov to the out viov
+ *
+ * if all remaining have been moved, out inherits the lease
+ *
+ * this does not copy, just adjusts the pointers
+ * out must be zero initialized, unless it acts as a buffer
+ */
+static inline size_t
+viov_take(struct viov *in, struct viov *out, size_t bytes)
+{
+	if (bytes > in->iov.iov_len)
+		bytes = in->iov.iov_len;
+	iovec_collect(&in->iov, &out->iov, bytes);
+	if (in->iov.iov_len == 0) {
+		out->lease = in->lease;
+		in->lease = VAI_LEASE_NORET;
+	} else
+		out->lease = VAI_LEASE_NORET;
+	return (bytes);
+}
+
+/*
  * return a single lease via the vdc vscaret
  */
 static inline
