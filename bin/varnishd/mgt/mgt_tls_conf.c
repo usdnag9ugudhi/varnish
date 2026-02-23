@@ -666,6 +666,7 @@ TLS_Config(const char *fn)
 	struct vtls_frontend_cfg *fcfg;
 	struct vsb *vsb;
 	struct listen_sock *ls;
+	const char *p;
 	int n;
 
 	AN(fn);
@@ -731,7 +732,11 @@ TLS_Config(const char *fn)
 		}
 
 		if (fcfg->argspec != NULL) {
-			VSB_printf(vsb, "%s,TLS", fcfg->argspec);
+			p = fcfg->argspec;
+			/* Translate "*:" to ":" for INADDR_ANY */
+			if (p[0] == '*' && p[1] == ':')
+				p++;
+			VSB_printf(vsb, "%s,TLS", p);
 		} else {
 			frontend_fmt(vsb, fcfg->host, fcfg->port);
 			VSB_cat(vsb, ",TLS");
