@@ -477,6 +477,7 @@ vdpio_gunzip_init(VRT_CTX, struct vdp_ctx *vdc, void **priv, int capacity)
 	in = WS_Alloc(ctx->ws, VSCARAB_SIZE(capacity));
 	if (in == NULL)
 		return (-1);
+	VSCARAB_INIT(in, capacity);
 
 	vg = VGZ_NewGunzip(vdc->vsl, "U D -");
 	if (vg == NULL)
