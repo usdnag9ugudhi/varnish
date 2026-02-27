@@ -250,18 +250,23 @@ vtls_ja3_parsefields(int bytes_per_field, const unsigned char *data, int len,
 	}
 }
 
-static int
-vtls_get_ja3_from_raw(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
-    struct vtls_sess *tsp)
+int
+VTLS_fingerprint_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 {
+	const struct ja3_ja4_raw_ch *raw;
 	struct vsb ja3[1];
 	size_t i;
 	int first, type;
 	char *ja3_str;
 	uintptr_t sn;
 
-	if (raw == NULL || sp == NULL || tsp == NULL)
-		return (1);
+	(void)ssl;
+	AN(sp);
+	AN(tsp);
+	if (tsp->ja3_ja4_raw == NULL)
+		return (0);
+	raw = tsp->ja3_ja4_raw;
+
 	sn = WS_Snapshot(sp->ws);
 	WS_VSB_new(ja3, sp->ws);
 	VSB_printf(ja3, "%i,", (int)raw->legacy_version);
@@ -303,17 +308,6 @@ vtls_get_ja3_from_raw(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
 	REPLACE(tsp->ja3, ja3_str);
 	WS_Reset(sp->ws, sn);
 	return (0);
-}
-
-int
-VTLS_fingerprint_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
-{
-	(void)ssl;
-	if (sp == NULL || tsp == NULL)
-		return (0);
-	if (tsp->ja3_ja4_raw == NULL)
-		return (0);
-	return (vtls_get_ja3_from_raw(tsp->ja3_ja4_raw, sp, tsp));
 }
 
 /*
@@ -426,62 +420,6 @@ ja4_fmt_hex_list(struct ws *ws, int kind, const void *arr, size_t n)
 #define DTLS1_2_WIRE	0xfefd
 #define DTLS1_3_WIRE	0xfefc
 
-static const char *
-ja4_version_str(uint16_t wire)
-{
-	switch (wire) {
-	case TLS1_3_WIRE:  return ("13");
-	case TLS1_2_WIRE:  return ("12");
-	case TLS1_1_WIRE:  return ("11");
-	case TLS1_0_WIRE:  return ("10");
-	case SSL3_WIRE:    return ("s3");
-	case SSL2_WIRE:    return ("s2");
-	case DTLS1_0_WIRE: return ("d1");
-	case DTLS1_2_WIRE: return ("d2");
-	case DTLS1_3_WIRE: return ("d3");
-	default: return ("00");
-	}
-}
-
-/* Set first and last character of first ALPN entry; default '0','0'. */
-static void
-ja4_alpn_first_last(const struct ja3_ja4_raw_ch *raw, char *first, char *last)
-{
-	const unsigned char *alpn_data, *proto;
-	size_t list_len, proto_len, i;
-	char hex_buf[512];
-
-	if (raw == NULL || first == NULL || last == NULL)
-		return;
-	*first = '0';
-	*last = '0';
-	alpn_data = raw->alpn;
-	if (alpn_data == NULL || raw->alpn_len < ALPN_FIRST_PROTO_OFFSET)
-		return;
-	list_len = vbe16dec(alpn_data + ALPN_LIST_LEN_OFFSET);
-	if (list_len == 0 || list_len > raw->alpn_len - ALPN_FIRST_PROTO_LEN_OFFSET)
-		return;
-	proto_len = alpn_data[ALPN_FIRST_PROTO_LEN_OFFSET];
-	if (proto_len == 0 || proto_len > list_len - 1)
-		return;
-	proto = alpn_data + ALPN_FIRST_PROTO_OFFSET;
-	if (proto_len * 2 > sizeof(hex_buf))
-		return;
-	if (isalnum((unsigned char)proto[0]) &&
-	    isalnum((unsigned char)proto[proto_len - 1])) {
-		*first = (char)proto[0];
-		*last = (char)proto[proto_len - 1];
-		return;
-	}
-	for (i = 0; i < proto_len; i++) {
-		hex_buf[2 * i] = "0123456789abcdef"[proto[i] >> 4];
-		hex_buf[2 * i + 1] = "0123456789abcdef"[proto[i] & 0xf];
-	}
-	hex_buf[proto_len * 2] = '\0';
-	*first = hex_buf[0];
-	*last = (proto_len * 2 > 1 ? hex_buf[proto_len * 2 - 1] : hex_buf[0]);
-}
-
 /*
  * Build one JA4 variant from the parsed Client Hello and store it in tsp.
  * variant is a bitfield: VTLS_JA4_SORTED and/or VTLS_JA4_HASHED (use
@@ -499,6 +437,7 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 	size_t exts_len, sig_len, total, result_len;
 	const unsigned char *sv;
 	unsigned n_ciphers_u, n_exts_u;
+	const char *ver_str;
 	char part_a[JA4_PART_A_MAX];
 	char ja4_buf[JA4_RESULT_MAX];
 	char *ciphers_str, *exts_str, *sig_algs_str;
@@ -509,9 +448,12 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 	uint16_t *sigs;
 	int do_sort, do_hash;
 	char alpn_first, alpn_last;
+	const unsigned char *alpn_data, *proto;
+	size_t list_len, proto_len, i;
+	char hex_buf[512];
 
-	if (sp == NULL || tsp == NULL)
-		return (-1);
+	AN(sp);
+	AN(tsp);
 	if (tsp->ja3_ja4_raw == NULL)
 		return (-1);
 	/* Only the four valid combinations. */
@@ -533,7 +475,7 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 	do_sort = (variant & VTLS_JA4_SORTED) != 0;
 	do_hash = (variant & VTLS_JA4_HASHED) != 0;
 
-	/* Step 1: version (from supported_versions or legacy). */
+	/* Part A: version, SNI, counts, ALPN. */
 	if (raw->supported_versions != NULL && raw->supported_versions_len >= 2) {
 		size_t off;
 		uint16_t v;
@@ -550,7 +492,19 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 	} else
 		wire = raw->legacy_version;
 
-	/* Step 2: cipher and extension counts (non-GREASE, cap at 99), SNI, ALPN. */
+	switch (wire) {
+	case TLS1_3_WIRE:  ver_str = "13"; break;
+	case TLS1_2_WIRE:  ver_str = "12"; break;
+	case TLS1_1_WIRE:  ver_str = "11"; break;
+	case TLS1_0_WIRE:  ver_str = "10"; break;
+	case SSL3_WIRE:    ver_str = "s3"; break;
+	case SSL2_WIRE:    ver_str = "s2"; break;
+	case DTLS1_0_WIRE: ver_str = "d1"; break;
+	case DTLS1_2_WIRE: ver_str = "d2"; break;
+	case DTLS1_3_WIRE: ver_str = "d3"; break;
+	default: ver_str = "00"; break;
+	}
+
 	n_ciphers_u = 0;
 	for (ci = 0; ci + 2 <= raw->cipher_len; ci += 2) {
 		if (!IS_GREASE_TLS(vbe16dec(raw->ciphers + ci)))
@@ -565,11 +519,39 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 		n_ciphers_u = JA4_COUNT_CAP;
 	if (n_exts_u > JA4_COUNT_CAP)
 		n_exts_u = JA4_COUNT_CAP;
-	ja4_alpn_first_last(raw, &alpn_first, &alpn_last);
-	sprintf(part_a, "t%s%c%02u%02u%c%c", ja4_version_str(wire),
+
+	alpn_first = '0';
+	alpn_last = '0';
+	alpn_data = raw->alpn;
+	if (alpn_data != NULL && raw->alpn_len >= ALPN_FIRST_PROTO_OFFSET) {
+		list_len = vbe16dec(alpn_data + ALPN_LIST_LEN_OFFSET);
+		if (list_len > 0 && list_len <= raw->alpn_len - ALPN_FIRST_PROTO_LEN_OFFSET) {
+			proto_len = alpn_data[ALPN_FIRST_PROTO_LEN_OFFSET];
+			if (proto_len > 0 && proto_len <= list_len - 1) {
+				proto = alpn_data + ALPN_FIRST_PROTO_OFFSET;
+				if (proto_len * 2 <= sizeof(hex_buf)) {
+					if (isalnum((unsigned char)proto[0]) &&
+					    isalnum((unsigned char)proto[proto_len - 1])) {
+						alpn_first = (char)proto[0];
+						alpn_last = (char)proto[proto_len - 1];
+					} else {
+						for (i = 0; i < proto_len; i++) {
+							hex_buf[2 * i] = "0123456789abcdef"[proto[i] >> 4];
+							hex_buf[2 * i + 1] = "0123456789abcdef"[proto[i] & 0xf];
+						}
+						hex_buf[proto_len * 2] = '\0';
+						alpn_first = hex_buf[0];
+						alpn_last = (proto_len * 2 > 1 ? hex_buf[proto_len * 2 - 1] : hex_buf[0]);
+					}
+				}
+			}
+		}
+	}
+
+	sprintf(part_a, "t%s%c%02u%02u%c%c", ver_str,
 	    raw->has_sni ? 'd' : 'i', n_ciphers_u, n_exts_u, alpn_first, alpn_last);
 
-	/* Step 3: cipher list (non-GREASE, optionally sorted), as hex string. */
+	/* Part B: cipher list (non-GREASE, optionally sorted), as hex string. */
 	n_ciphers = 0;
 	for (ci = 0; ci + 2 <= raw->cipher_len; ci += 2) {
 		if (!IS_GREASE_TLS(vbe16dec(raw->ciphers + ci)))
@@ -592,7 +574,7 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 			goto fail;
 	}
 
-	/* Step 4: extension list (exclude SNI and ALPN), optionally sorted, as hex. */
+	/* Part C: extension list (exclude SNI and ALPN), optionally sorted, then sig algs. */
 	n_exts = 0;
 	for (ei = 0; ei < raw->ext_count; ei++) {
 		if (!IS_GREASE_TLS(raw->ext_types[ei]) &&
@@ -618,7 +600,7 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 			goto fail;
 	}
 
-	/* Step 5: signature algorithms as hex string. */
+	/* Signature algorithms as hex string. */
 	sig_algs_str = NULL;
 	n_sig = 0;
 	if (raw->sig_algs != NULL && raw->sig_algs_len >= 2) {
@@ -642,7 +624,7 @@ VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
 		}
 	}
 
-	/* Step 6: build result — hashed (part_a + hash(B) + hash(C)) or raw. */
+	/* Result: hashed (part_a + hash(B) + hash(C)) or raw. */
 	if (do_hash) {
 		vtls_ja4_hash12(ciphers_str ? ciphers_str : "", strlen_safe(ciphers_str), ciphers_hash);
 		exts_len = strlen_safe(exts_str);
@@ -702,7 +684,8 @@ fail:
 void
 VTLS_fingerprint_raw_free(void **praw)
 {
-	if (praw == NULL || *praw == NULL)
+	AN(praw);
+	if (*praw == NULL)
 		return;
 	vtls_ja3_ja4_raw_free(*praw);
 	free(*praw);
