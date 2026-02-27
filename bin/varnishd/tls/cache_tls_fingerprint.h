@@ -1,7 +1,4 @@
 /*-
- * Copyright (c) 2019-2026 Varnish Software AS
- * All rights reserved.
- *
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * TLS client fingerprinting (JA3/JA4) API.

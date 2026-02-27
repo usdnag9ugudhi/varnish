@@ -1,10 +1,4 @@
 /*-
- * Copyright (c) 2019-2026 Varnish Software AS
- * All rights reserved.
- *
- * Author: Dag Haavi Finstad <daghf@varnish-software.com>
- * Author: Niklas Brand <niklasb@varnish-software.com>
- *
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Redistribution and use in source and binary forms, with or without
@@ -50,8 +44,6 @@
 
 #define IS_GREASE_TLS(x) \
 	((((x) & 0x0f0f) == 0x0a0a) && (((x) & 0xff) == (((x) >> 8) & 0xff)))
-
-/* --- JA3/JA4 raw Client Hello --- */
 
 /*
  * Raw Client Hello parse result for JA3/JA4. Extension list is wire-accurate
@@ -112,7 +104,6 @@ struct ja3_ja4_raw_ch {
 #define TLSEXT_TYPE_supported_versions		43
 #endif
 
-/* Capture extension payload into *out (malloc'd); frees previous *out. Returns 0 on success, -1 on malloc failure. */
 static int
 set_raw_ext_payload(unsigned char **out, size_t *out_len,
     const unsigned char *src, size_t len)
@@ -233,7 +224,6 @@ vtls_ja3_ja4_raw_free(struct ja3_ja4_raw_ch *raw)
 	memset(raw, 0, sizeof(*raw));
 }
 
-/* Format TLS field list (1 or 2 bytes per field) into ja3 string, comma-sep, GREASE skipped. */
 static void
 vtls_ja3_parsefields(int bytes_per_field, const unsigned char *data, int len,
     struct vsb *ja3)
@@ -259,8 +249,6 @@ vtls_ja3_parsefields(int bytes_per_field, const unsigned char *data, int len,
 		}
 	}
 }
-
-/* --- JA3 fingerprint --- */
 
 static int
 vtls_get_ja3_from_raw(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
@@ -319,7 +307,6 @@ static int
 vtls_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 {
 	(void)ssl;
-	/* JA3 uses only raw Client Hello; no OpenSSL fallback */
 	if (tsp->ja3_ja4_raw == NULL)
 		return (0);
 	return (vtls_get_ja3_from_raw(tsp->ja3_ja4_raw, sp, tsp));
@@ -359,9 +346,6 @@ strlen_safe(const char *s)
 	return (s != NULL && *s != '\0') ? strlen(s) : 0;
 }
 
-/* --- JA4 fingerprint --- */
-
-/* JA4: first JA4_HASH_LEN hex chars of SHA256; empty input -> "000000000000". */
 static void
 vtls_ja4_hash12(const char *in, size_t len, char out[JA4_HASH_BUF])
 {
@@ -403,7 +387,6 @@ cmp_int(const void *a, const void *b)
 #define DTLS1_2_WIRE	0xfefd
 #define DTLS1_3_WIRE	0xfefc
 
-/* JA4 Part A: map TLS/DTLS version code to 2-char string. */
 static const char *
 ja4_version_str(uint16_t v)
 {
@@ -421,7 +404,6 @@ ja4_version_str(uint16_t v)
 	}
 }
 
-/* JA4 from raw: version string (supported_versions or legacy). */
 static const char *
 ja4_version_str_from_raw(const struct ja3_ja4_raw_ch *raw)
 {
@@ -445,7 +427,6 @@ ja4_version_str_from_raw(const struct ja3_ja4_raw_ch *raw)
 	return (ja4_version_str(raw->legacy_version));
 }
 
-/* JA4 from raw: ALPN first/last from raw ALPN payload. */
 static void
 ja4_alpn_first_last_raw(const unsigned char *alpn_data, size_t alpn_len,
     char *alpn_first, char *alpn_last)
@@ -483,7 +464,6 @@ ja4_alpn_first_last_raw(const unsigned char *alpn_data, size_t alpn_len,
 	*alpn_last = (proto_len * 2 > 1 ? hex_buf[proto_len * 2 - 1] : hex_buf[0]);
 }
 
-/* JA4 Part B from raw: build cipher list from raw bytes. */
 static int
 ja4_build_cipher_list_raw(const unsigned char *cipher_list,
     size_t cipher_list_len, int sorted, char **out)
@@ -535,7 +515,6 @@ ja4_build_cipher_list_raw(const unsigned char *cipher_list,
 	return (0);
 }
 
-/* JA4 Part C from raw: build sig algs string (GREASE excluded). */
 static int
 ja4_build_sig_algs_str_raw(const unsigned char *sig_alg_data,
     size_t sig_alg_len, char **out)
@@ -581,7 +560,6 @@ ja4_build_sig_algs_str_raw(const unsigned char *sig_alg_data,
 	return (0);
 }
 
-/* JA4 Part C: build comma-sep extension list (sorted or original, optionally exclude SNI/ALPN). *out malloc'd. */
 static int
 ja4_build_exts_list(const int *ext_types, size_t ext_count_total,
     int sorted, int exclude_sni_alpn, char **out)
@@ -640,7 +618,6 @@ ja4_build_exts_list(const int *ext_types, size_t ext_count_total,
 	return (0);
 }
 
-/* JA4 Part C: hash of exts_str + optional "_" + sig_algs. Writes to out[JA4_HASH_BUF]. */
 static int
 ja4_exts_sigs_hash(const char *exts_str, const char *sig_algs, char out[JA4_HASH_BUF])
 {
@@ -671,7 +648,6 @@ ja4_exts_sigs_hash(const char *exts_str, const char *sig_algs, char out[JA4_HASH
 	return (0);
 }
 
-/* JA4 unhashed form (for ja4_r / ja4_ro): PartA_ciphers_exts or PartA_ciphers_exts_sigs. Returns malloc'd string or NULL. */
 static char *
 ja4_build_raw(const char *part_a, const char *ciphers_str, const char *exts_str,
     const char *sig_algs)
@@ -701,7 +677,6 @@ ja4_build_raw(const char *part_a, const char *ciphers_str, const char *exts_str,
 	return (out);
 }
 
-/* JA4 Part A: protocol, version, SNI, cipher count, extension count, ALPN first/last. */
 static void
 ja4_build_part_a(const struct ja3_ja4_raw_ch *raw, char part_a[JA4_PART_A_MAX])
 {
@@ -731,7 +706,6 @@ ja4_build_part_a(const struct ja3_ja4_raw_ch *raw, char part_a[JA4_PART_A_MAX])
 	    nr_ciphers, nr_exts, alpn_first, alpn_last);
 }
 
-/* JA4 hashed form (Part A + cipher hash + exts_sigs hash). Returns malloc'd string or NULL. */
 static char *
 ja4_build_hashed_result(const char *part_a, const char *ciphers_str,
     const char *exts_str, const char *sig_algs)
@@ -830,13 +804,10 @@ static int
 vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 {
 	(void)ssl;
-	/* JA4 uses only raw Client Hello; no OpenSSL fallback */
 	if (tsp->ja3_ja4_raw == NULL)
 		return (0);
 	return (vtls_get_ja4_from_raw(tsp->ja3_ja4_raw, sp, tsp));
 }
-
-/* --- Exported API --- */
 
 void
 VTLS_fingerprint_raw_free(void **praw)

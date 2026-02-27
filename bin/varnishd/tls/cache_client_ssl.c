@@ -253,13 +253,6 @@ _vtls_sni_lookup(const struct vtls_sni_map *m, const char *id, int wc)
 	return (NULL);
 }
 
-/* Public wrapper that enables wildcard matching. */
-static struct vtls_ctx *
-vtls_sni_lookup(const struct vtls_sni_map *m, const char *id)
-{
-	return (_vtls_sni_lookup(m, id, 1));
-}
-
 /*
  * Check if a hostname already exists in the SNI map
  */
@@ -486,6 +479,12 @@ do {									\
 
 	(void)nb;  /* nb may be 0 if all names were duplicates - that's OK */
 	return (0);
+}
+
+static struct vtls_ctx *
+vtls_sni_lookup(const struct vtls_sni_map *m, const char *id)
+{
+	return (_vtls_sni_lookup(m, id, 1));
 }
 
 static void

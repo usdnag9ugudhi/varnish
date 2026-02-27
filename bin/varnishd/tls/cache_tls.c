@@ -486,83 +486,23 @@ vtls_get_sess(const struct vrt_ctx *ctx)
 	return (NULL);
 }
 
-/* VMOD accessor: get SSL context */
-const SSL *
-VTLS_tls_ctx(const struct vrt_ctx *ctx)
-{
-	struct vtls_sess *tsp;
-
-	tsp = vtls_get_sess(ctx);
-	if (tsp == NULL)
-		return (NULL);
-
-	return (tsp->ssl);
+#define VTLS_VMOD_ACCESSOR(ret_type, name, member)			\
+ret_type								\
+name(const struct vrt_ctx *ctx)						\
+{									\
+	struct vtls_sess *tsp;						\
+	tsp = vtls_get_sess(ctx);					\
+	if (tsp == NULL)						\
+		return (NULL);						\
+	return (tsp->member);						\
 }
 
-/* VMOD accessor: get JA3 fingerprint */
-const char *
-VTLS_ja3(const struct vrt_ctx *ctx)
-{
-	struct vtls_sess *tsp;
-
-	tsp = vtls_get_sess(ctx);
-	if (tsp == NULL)
-		return (NULL);
-
-	return (tsp->ja3);
-}
-
-/* VMOD accessor: get JA4 fingerprint */
-const char *
-VTLS_ja4(const struct vrt_ctx *ctx)
-{
-	struct vtls_sess *tsp;
-
-	tsp = vtls_get_sess(ctx);
-	if (tsp == NULL)
-		return (NULL);
-
-	return (tsp->ja4);
-}
-
-/* VMOD accessor: get JA4 raw (sorted) fingerprint */
-const char *
-VTLS_ja4_r(const struct vrt_ctx *ctx)
-{
-	struct vtls_sess *tsp;
-
-	tsp = vtls_get_sess(ctx);
-	if (tsp == NULL)
-		return (NULL);
-
-	return (tsp->ja4_r);
-}
-
-/* VMOD accessor: get JA4 hashed original-order fingerprint */
-const char *
-VTLS_ja4_o(const struct vrt_ctx *ctx)
-{
-	struct vtls_sess *tsp;
-
-	tsp = vtls_get_sess(ctx);
-	if (tsp == NULL)
-		return (NULL);
-
-	return (tsp->ja4_o);
-}
-
-/* VMOD accessor: get JA4 raw original-order fingerprint */
-const char *
-VTLS_ja4_ro(const struct vrt_ctx *ctx)
-{
-	struct vtls_sess *tsp;
-
-	tsp = vtls_get_sess(ctx);
-	if (tsp == NULL)
-		return (NULL);
-
-	return (tsp->ja4_ro);
-}
+VTLS_VMOD_ACCESSOR(const SSL *, VTLS_tls_ctx, ssl)
+VTLS_VMOD_ACCESSOR(const char *, VTLS_ja3, ja3)
+VTLS_VMOD_ACCESSOR(const char *, VTLS_ja4, ja4)
+VTLS_VMOD_ACCESSOR(const char *, VTLS_ja4_r, ja4_r)
+VTLS_VMOD_ACCESSOR(const char *, VTLS_ja4_o, ja4_o)
+VTLS_VMOD_ACCESSOR(const char *, VTLS_ja4_ro, ja4_ro)
 
 /*
  * This is the SSL_do_handshake/poll loop.
