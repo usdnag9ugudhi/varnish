@@ -107,6 +107,10 @@ set_raw_ext_payload(unsigned char **out, size_t *out_len,
 {
 	unsigned char *copy;
 
+	if (out == NULL || out_len == NULL)
+		return (-1);
+	if (len > 0 && src == NULL)
+		return (-1);
 	copy = malloc(len);
 	if (copy == NULL)
 		return (-1);
@@ -140,6 +144,8 @@ vtls_ja3_ja4_raw_parse_clienthello(const unsigned char *buf, size_t len,
 	uint16_t cipher_suites_len;
 	unsigned char *copy;
 
+	if (buf == NULL || out == NULL)
+		return (-1);
 	memset(out, 0, sizeof(*out));
 	if (len < CH_RECORD_HEADER_LEN || len > VTLS_CLIENT_HELLO_MAX_LEN ||
 	    buf[0] != SSL3_MT_CLIENT_HELLO)
@@ -224,6 +230,8 @@ vtls_ja3_parsefields(int bytes_per_field, const unsigned char *data, int len,
 	uint16_t tmp;
 	int first = 1;
 
+	if (data == NULL || ja3 == NULL)
+		return;
 	for (cnt = 0; cnt < len; cnt += bytes_per_field) {
 		if (bytes_per_field == 1)
 			tmp = *data;
@@ -252,6 +260,8 @@ vtls_get_ja3_from_raw(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
 	char *ja3_str;
 	uintptr_t sn;
 
+	if (raw == NULL || sp == NULL || tsp == NULL)
+		return (1);
 	sn = WS_Snapshot(sp->ws);
 	WS_VSB_new(ja3, sp->ws);
 	VSB_printf(ja3, "%i,", (int)raw->legacy_version);
@@ -299,6 +309,8 @@ int
 VTLS_fingerprint_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 {
 	(void)ssl;
+	if (sp == NULL || tsp == NULL)
+		return (0);
 	if (tsp->ja3_ja4_raw == NULL)
 		return (0);
 	return (vtls_get_ja3_from_raw(tsp->ja3_ja4_raw, sp, tsp));
@@ -377,6 +389,10 @@ ja4_fmt_hex_list(struct ws *ws, int kind, const void *arr, size_t n)
 	const uint16_t *u16 = arr;
 	const int *i32 = arr;
 
+	if (ws == NULL)
+		return (NULL);
+	if (n > 0 && arr == NULL)
+		return (NULL);
 	if (n == 0)
 		return (NULL);
 	buf_len = n * JA4_HEX_ITEM_MAX;
@@ -435,6 +451,8 @@ ja4_alpn_first_last(const struct ja3_ja4_raw_ch *raw, char *first, char *last)
 	size_t list_len, proto_len, i;
 	char hex_buf[512];
 
+	if (raw == NULL || first == NULL || last == NULL)
+		return;
 	*first = '0';
 	*last = '0';
 	alpn_data = raw->alpn;
@@ -492,6 +510,8 @@ vtls_get_ja4_one_variant(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
 	int do_sort, do_hash;
 	char alpn_first, alpn_last;
 
+	if (raw == NULL || sp == NULL || tsp == NULL)
+		return (1);
 	ws = sp->ws;
 	sn = WS_Snapshot(ws);
 	do_sort = (variant <= VTLS_JA4_R);
@@ -666,6 +686,8 @@ int
 VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
     enum vtls_ja4_variant variant)
 {
+	if (sp == NULL || tsp == NULL)
+		return (-1);
 	if (tsp->ja3_ja4_raw == NULL)
 		return (-1);
 	switch (variant) {
@@ -695,6 +717,8 @@ VTLS_fingerprint_parse_clienthello(const unsigned char *buf, size_t len,
 	struct ja3_ja4_raw_ch *raw;
 
 	AN(out_raw);
+	if (buf == NULL)
+		return (-1);
 	*out_raw = NULL;
 	raw = malloc(sizeof(struct ja3_ja4_raw_ch));
 	if (raw == NULL)

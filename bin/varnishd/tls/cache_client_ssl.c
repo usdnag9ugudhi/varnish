@@ -119,6 +119,8 @@ VTLS_del_sess(struct vtls_sess **ptsp, struct sess *sp)
 {
 	struct vtls_sess *tsp;
 
+	if (ptsp == NULL)
+		return;
 	CHECK_OBJ_NOTNULL(sp->pool, POOL_MAGIC);
 	TAKE_OBJ_NOTNULL(tsp, ptsp, VTLS_SESS_MAGIC);
 
