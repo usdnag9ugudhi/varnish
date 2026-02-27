@@ -720,15 +720,17 @@ vtls_clienthello_cb(SSL *ssl, int *al, void *priv)
 	if (cache_param->tls_ja3 && VTLS_fingerprint_get_ja3(ssl, sp, tsp) != 0)
 		return (SSL_CLIENT_HELLO_ERROR);
 
-	/*
-	 * JA4 variants are computed when VCL calls tls.ja4() etc., not here.
-	 * When any JA4 param is on, leave ja3_ja4_raw so those VMOD calls can
-	 * use it; it is freed when the session ends (VTLS_del_sess). Otherwise
-	 * free it now.
-	 */
-	if (!(cache_param->tls_ja4 || cache_param->tls_ja4_r ||
-	    cache_param->tls_ja4_o || cache_param->tls_ja4_ro))
-		VTLS_fingerprint_raw_free(&tsp->ja3_ja4_raw);
+	if (cache_param->tls_ja4 && VTLS_fingerprint_get_ja4_variant(sp, tsp, VTLS_JA4_MAIN) != 0)
+		return (SSL_CLIENT_HELLO_ERROR);
+	if (cache_param->tls_ja4_r && VTLS_fingerprint_get_ja4_variant(sp, tsp, VTLS_JA4_R) != 0)
+		return (SSL_CLIENT_HELLO_ERROR);
+	if (cache_param->tls_ja4_o && VTLS_fingerprint_get_ja4_variant(sp, tsp, VTLS_JA4_O) != 0)
+		return (SSL_CLIENT_HELLO_ERROR);
+	if (cache_param->tls_ja4_ro && VTLS_fingerprint_get_ja4_variant(sp, tsp, VTLS_JA4_RO) != 0)
+		return (SSL_CLIENT_HELLO_ERROR);
+
+	/* Raw Client Hello no longer needed; free it now. */
+	VTLS_fingerprint_raw_free(&tsp->ja3_ja4_raw);
 
 	if (!SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_server_name,
 	    &ext, &l)) {

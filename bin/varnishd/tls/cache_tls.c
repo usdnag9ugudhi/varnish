@@ -498,9 +498,9 @@ name(const struct vrt_ctx *ctx)						\
 	return (tsp->member);						\
 }
 
-/* JA4: each variant is computed on demand when its param is on and VCL calls
- * the corresponding getter (tls.ja4(), tls.ja4_r(), etc.). Only that variant
- * is computed; enable params only for the fingerprints you need.
+/* JA4: variants are computed in the Client Hello callback when the
+ * corresponding param is on (same flow as JA3). Accessors just return
+ * the precomputed value.
  */
 #define VTLS_JA4_ACCESSOR(name, member, variant, param_on)		\
 const char *								\
@@ -510,10 +510,6 @@ name(const struct vrt_ctx *ctx)						\
 	tsp = vtls_get_sess(ctx);					\
 	if (tsp == NULL || !(param_on))					\
 		return (NULL);						\
-	if (tsp->member == NULL && tsp->ja3_ja4_raw != NULL &&		\
-	    ctx->sp != NULL)						\
-		(void)VTLS_fingerprint_get_ja4_variant(ctx->sp, tsp,	\
-		    variant);						\
 	return (tsp->member);						\
 }
 

@@ -1122,7 +1122,7 @@ PARAM_SIMPLE(
 	/* descr */
 	"Enable JA4 TLS client fingerprint (hashed, sorted) for incoming TLS "
 	"connections. When enabled, tls.ja4() returns the fingerprint. "
-	"Computed on first use. See also tls_ja4_r, tls_ja4_o, tls_ja4_ro."
+	"See also tls_ja4_r, tls_ja4_o, tls_ja4_ro."
 )
 
 PARAM_SIMPLE(
@@ -1134,7 +1134,7 @@ PARAM_SIMPLE(
 	/* units */	"bool",
 	/* descr */
 	"Enable JA4 raw fingerprint (sorted) for incoming TLS connections. "
-	"When enabled, tls.ja4_r() returns the fingerprint. Computed on first use."
+	"When enabled, tls.ja4_r() returns the fingerprint."
 )
 
 PARAM_SIMPLE(
@@ -1146,8 +1146,7 @@ PARAM_SIMPLE(
 	/* units */	"bool",
 	/* descr */
 	"Enable JA4 fingerprint (hashed, original order) for incoming TLS "
-	"connections. When enabled, tls.ja4_o() returns the fingerprint. "
-	"Computed on first use."
+	"connections. When enabled, tls.ja4_o() returns the fingerprint."
 )
 
 PARAM_SIMPLE(
@@ -1159,8 +1158,7 @@ PARAM_SIMPLE(
 	/* units */	"bool",
 	/* descr */
 	"Enable JA4 raw fingerprint (original order) for incoming TLS "
-	"connections. When enabled, tls.ja4_ro() returns the fingerprint. "
-	"Computed on first use."
+	"connections. When enabled, tls.ja4_ro() returns the fingerprint."
 )
 
 PARAM_SIMPLE(
