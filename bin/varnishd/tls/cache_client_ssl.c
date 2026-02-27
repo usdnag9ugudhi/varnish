@@ -747,21 +747,27 @@ vtls_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 #define TLSEXT_TYPE_alpn		16
 #endif
 
-/* JA4: first 12 hex chars of SHA256; empty input -> "000000000000". */
+#define JA4_HASH_LEN		12	/* hex chars in Part B/C hashes */
+#define JA4_HASH_BUF		13	/* JA4_HASH_LEN + NUL */
+#define JA4_COUNT_CAP		99	/* cap for cipher/extension counts */
+#define JA4_PART_A_MAX		16	/* max length of Part A string */
+#define JA4_HEX_ITEM_MAX	5	/* max chars per comma-sep hex item (e.g. "abcd,") */
+
+/* JA4: first JA4_HASH_LEN hex chars of SHA256; empty input -> "000000000000". */
 static void
-vtls_ja4_hash12(const char *in, size_t len, char out[13])
+vtls_ja4_hash12(const char *in, size_t len, char out[JA4_HASH_BUF])
 {
 	unsigned char digest[SHA256_DIGEST_LENGTH];
 	unsigned u;
 
 	if (len == 0) {
-		memcpy(out, "000000000000", 13);
+		memcpy(out, "000000000000", JA4_HASH_BUF);
 		return;
 	}
 	SHA256((const unsigned char *)in, len, digest);
-	for (u = 0; u < 6; u++)
+	for (u = 0; u < JA4_HASH_LEN / 2; u++)
 		sprintf(out + u * 2, "%02x", digest[u]);
-	out[12] = '\0';
+	out[JA4_HASH_LEN] = '\0';
 }
 
 static int
@@ -874,7 +880,7 @@ ja4_alpn_first_last(SSL *ssl, char *alpn_first, char *alpn_last)
 	*alpn_last = (proto_len * 2 > 1 ? hex_buf[proto_len * 2 - 1] : hex_buf[0]);
 }
 
-/* JA4: build comma-sep cipher list (sorted or original order). *out is malloc'd. Returns 0 or -1. */
+/* JA4 Part B: build comma-sep cipher list (sorted or original order). *out is malloc'd. Returns 0 or -1. */
 static int
 ja4_build_cipher_list(SSL *ssl, int sorted, char **out)
 {
@@ -913,7 +919,7 @@ ja4_build_cipher_list(SSL *ssl, int sorted, char **out)
 	}
 	if (sorted)
 		qsort(ciphers, cipher_count, sizeof(uint16_t), cmp_uint16);
-	buf_len = cipher_count * 5;
+	buf_len = cipher_count * JA4_HEX_ITEM_MAX;
 	buf = malloc(buf_len);
 	if (buf == NULL) {
 		free(ciphers);
@@ -932,7 +938,7 @@ ja4_build_cipher_list(SSL *ssl, int sorted, char **out)
 	return (0);
 }
 
-/* JA4: build comma-sep extension list (sorted or original, optionally exclude SNI/ALPN). *out malloc'd. */
+/* JA4 Part C: build comma-sep extension list (sorted or original, optionally exclude SNI/ALPN). *out malloc'd. */
 static int
 ja4_build_exts_list(const int *ext_types, size_t ext_count_total,
     int sorted, int exclude_sni_alpn, char **out)
@@ -972,7 +978,7 @@ ja4_build_exts_list(const int *ext_types, size_t ext_count_total,
 	}
 	if (sorted)
 		qsort(exts, ext_count, sizeof(int), cmp_int);
-	buf_len = ext_count * 5;
+	buf_len = ext_count * JA4_HEX_ITEM_MAX;
 	buf = malloc(buf_len);
 	if (buf == NULL) {
 		free(exts);
@@ -991,7 +997,7 @@ ja4_build_exts_list(const int *ext_types, size_t ext_count_total,
 	return (0);
 }
 
-/* JA4: build comma-sep signature algorithms in order. *out malloc'd. */
+/* JA4 Part C: build comma-sep signature algorithms in order. *out malloc'd. */
 static int
 ja4_build_sig_algs_str(SSL *ssl, char **out)
 {
@@ -1016,7 +1022,7 @@ ja4_build_sig_algs_str(SSL *ssl, char **out)
 		n++;
 	if (n == 0)
 		return (0);
-	buf_len = n * 5;
+	buf_len = n * JA4_HEX_ITEM_MAX;
 	buf = malloc(buf_len);
 	if (buf == NULL) {
 		free(*out);
@@ -1034,6 +1040,67 @@ ja4_build_sig_algs_str(SSL *ssl, char **out)
 	return (0);
 }
 
+/* JA4 Part C: hash of exts_str + optional "_" + sig_algs. Writes to out[JA4_HASH_BUF]. */
+static int
+ja4_exts_sigs_hash(const char *exts_str, const char *sig_algs, char out[JA4_HASH_BUF])
+{
+	size_t exts_len, sig_len, total;
+	char *combined = NULL;
+
+	exts_len = (exts_str != NULL && exts_str[0] != '\0') ? strlen(exts_str) : 0;
+	sig_len = (sig_algs != NULL && sig_algs[0] != '\0') ? strlen(sig_algs) : 0;
+
+	if (exts_len == 0 && sig_len == 0) {
+		vtls_ja4_hash12("", 0, out);
+		return (0);
+	}
+	total = exts_len + (sig_len > 0 ? 1 + sig_len : 0);
+	combined = malloc(total + 1);
+	if (combined == NULL)
+		return (-1);
+	if (exts_len > 0)
+		memcpy(combined, exts_str, exts_len + 1);
+	else
+		combined[0] = '\0';
+	if (sig_len > 0) {
+		strcat(combined, "_");
+		strcat(combined, sig_algs);
+	}
+	vtls_ja4_hash12(combined, total, out);
+	free(combined);
+	return (0);
+}
+
+/* JA4 raw: build PartA_ciphers_exts or PartA_ciphers_exts_sigs. Returns malloc'd string or NULL. */
+static char *
+ja4_build_raw(const char *part_a, const char *ciphers_str, const char *exts_str,
+    const char *sig_algs)
+{
+	size_t l;
+	size_t cl, el, sl;
+	char *out;
+
+	cl = (ciphers_str != NULL && ciphers_str[0] != '\0') ? strlen(ciphers_str) : 0;
+	el = (exts_str != NULL && exts_str[0] != '\0') ? strlen(exts_str) : 0;
+	sl = (sig_algs != NULL && sig_algs[0] != '\0') ? strlen(sig_algs) : 0;
+
+	l = strlen(part_a) + 1 + cl + 1 + el + 1;
+	if (sl > 0)
+		l += 1 + sl;
+	l++;
+
+	out = malloc(l);
+	if (out == NULL)
+		return (NULL);
+	if (sl > 0)
+		sprintf(out, "%s_%s_%s_%s", part_a,
+		    ciphers_str ? ciphers_str : "", exts_str ? exts_str : "", sig_algs);
+	else
+		sprintf(out, "%s_%s_%s", part_a,
+		    ciphers_str ? ciphers_str : "", exts_str ? exts_str : "");
+	return (out);
+}
+
 static int
 vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 {
@@ -1048,15 +1115,14 @@ vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 	char sni_marker;
 	char alpn_first;
 	char alpn_last;
-	char first_chunk[16];
+	char part_a[JA4_PART_A_MAX];
 	char *sorted_ciphers = NULL;
 	char *original_ciphers = NULL;
 	char *sorted_exts = NULL;
 	char *original_exts = NULL;
 	char *sig_algs = NULL;
-	char ciphers_hash[13];
-	char exts_sigs_hash[13];
-	size_t exts_sigs_len;
+	char ciphers_hash[JA4_HASH_BUF];
+	char exts_sigs_hash[JA4_HASH_BUF];
 	char *ja4_result = NULL;
 	char *ja4_r_result = NULL;
 	char *ja4_o_result = NULL;
@@ -1086,14 +1152,15 @@ vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 		}
 	}
 
-	nr_ciphers = (cipher_count > 99) ? 99 : (unsigned)cipher_count;
-	nr_exts = (nr_exts_raw > 99) ? 99 : nr_exts_raw;
+	nr_ciphers = (cipher_count > JA4_COUNT_CAP) ? JA4_COUNT_CAP : (unsigned)cipher_count;
+	nr_exts = (nr_exts_raw > JA4_COUNT_CAP) ? JA4_COUNT_CAP : nr_exts_raw;
 
 	tls_version_str = ja4_tls_version_str(ssl);
 	sni_marker = ja4_sni_marker(ssl);
 	ja4_alpn_first_last(ssl, &alpn_first, &alpn_last);
 
-	sprintf(first_chunk, "t%s%c%02u%02u%c%c", tls_version_str, sni_marker,
+	/* Part A: protocol, version, sni, counts, alpn */
+	sprintf(part_a, "t%s%c%02u%02u%c%c", tls_version_str, sni_marker,
 	    nr_ciphers, nr_exts, alpn_first, alpn_last);
 
 	if (ja4_build_cipher_list(ssl, 1, &sorted_ciphers) != 0)
@@ -1107,99 +1174,48 @@ vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 	if (ja4_build_sig_algs_str(ssl, &sig_algs) != 0)
 		goto fail;
 
-	/* Hash for JA4 part B (ciphers): sorted list; empty -> 000000000000 */
-	vtls_ja4_hash12(sorted_ciphers ? sorted_ciphers : "", sorted_ciphers ? strlen(sorted_ciphers) : 0, ciphers_hash);
+	/* Part B (cipher hash): sorted list; empty -> 000000000000 */
+	vtls_ja4_hash12(
+	    sorted_ciphers ? sorted_ciphers : "",
+	    sorted_ciphers ? strlen(sorted_ciphers) : 0,
+	    ciphers_hash);
 
-	/* Hash for JA4 part C (exts + sig algs): sorted exts, optional _sigs */
-	exts_sigs_len = strlen(sorted_exts ? sorted_exts : "");
-	if (sig_algs != NULL && sig_algs[0] != '\0') {
-		exts_sigs_len += 1 + strlen(sig_algs);
-	}
-	{
-		char *exts_sigs_str = NULL;
-		if (exts_sigs_len > 0) {
-			exts_sigs_str = malloc(exts_sigs_len + 1);
-			if (exts_sigs_str == NULL)
-				goto fail;
-			if (sorted_exts != NULL && sorted_exts[0] != '\0')
-				strcpy(exts_sigs_str, sorted_exts);
-			else
-				exts_sigs_str[0] = '\0';
-			if (sig_algs != NULL && sig_algs[0] != '\0') {
-				strcat(exts_sigs_str, "_");
-				strcat(exts_sigs_str, sig_algs);
-			}
-			vtls_ja4_hash12(exts_sigs_str, strlen(exts_sigs_str), exts_sigs_hash);
-			free(exts_sigs_str);
-		} else
-			vtls_ja4_hash12("", 0, exts_sigs_hash);
-	}
+	/* Part C (exts + sig algs hash): sorted exts, optional _sigs */
+	if (ja4_exts_sigs_hash(sorted_exts, sig_algs, exts_sigs_hash) != 0)
+		goto fail;
 
-	/* JA4: hashed sorted */
-	ja4_result = malloc(strlen(first_chunk) + 1 + 12 + 1 + 12 + 1);
+	/* JA4: hashed sorted (Part A + Part B + Part C) */
+	ja4_result = malloc(strlen(part_a) + 1 + JA4_HASH_LEN + 1 + JA4_HASH_LEN + 1);
 	if (ja4_result == NULL)
 		goto fail;
-	sprintf(ja4_result, "%s_%s_%s", first_chunk, ciphers_hash, exts_sigs_hash);
+	sprintf(ja4_result, "%s_%s_%s", part_a, ciphers_hash, exts_sigs_hash);
 
 	/* JA4_r: raw sorted */
-	{
-		size_t l = strlen(first_chunk) + 1 + (sorted_ciphers ? strlen(sorted_ciphers) : 0) + 1 +
-		    (sorted_exts ? strlen(sorted_exts) : 0) + 1 + (sig_algs && sig_algs[0] ? strlen(sig_algs) + 1 : 0) + 1;
-		ja4_r_result = malloc(l);
-		if (ja4_r_result == NULL)
-			goto fail;
-		if (sig_algs != NULL && sig_algs[0] != '\0')
-			sprintf(ja4_r_result, "%s_%s_%s_%s", first_chunk,
-			    sorted_ciphers ? sorted_ciphers : "", sorted_exts ? sorted_exts : "", sig_algs);
-		else
-			sprintf(ja4_r_result, "%s_%s_%s", first_chunk,
-			    sorted_ciphers ? sorted_ciphers : "", sorted_exts ? sorted_exts : "");
-	}
+	ja4_r_result = ja4_build_raw(part_a, sorted_ciphers, sorted_exts, sig_algs);
+	if (ja4_r_result == NULL)
+		goto fail;
 
 	/* JA4_o: hashed original order */
 	{
-		char orig_ciphers_hash[13];
-		char orig_exts_sigs_hash[13];
-		size_t orig_exts_sigs_len = strlen(original_exts ? original_exts : "");
-		if (sig_algs != NULL && sig_algs[0] != '\0')
-			orig_exts_sigs_len += 1 + strlen(sig_algs);
-		vtls_ja4_hash12(original_ciphers ? original_ciphers : "", original_ciphers ? strlen(original_ciphers) : 0, orig_ciphers_hash);
-		if (orig_exts_sigs_len > 0) {
-			char *orig_exts_sigs_str = malloc(orig_exts_sigs_len + 1);
-			if (orig_exts_sigs_str == NULL)
-				goto fail;
-			if (original_exts != NULL && original_exts[0] != '\0')
-				strcpy(orig_exts_sigs_str, original_exts);
-			else
-				orig_exts_sigs_str[0] = '\0';
-			if (sig_algs != NULL && sig_algs[0] != '\0') {
-				strcat(orig_exts_sigs_str, "_");
-				strcat(orig_exts_sigs_str, sig_algs);
-			}
-			vtls_ja4_hash12(orig_exts_sigs_str, strlen(orig_exts_sigs_str), orig_exts_sigs_hash);
-			free(orig_exts_sigs_str);
-		} else
-			vtls_ja4_hash12("", 0, orig_exts_sigs_hash);
-		ja4_o_result = malloc(strlen(first_chunk) + 1 + 12 + 1 + 12 + 1);
+		char orig_ciphers_hash[JA4_HASH_BUF];
+		char orig_exts_sigs_hash[JA4_HASH_BUF];
+
+		vtls_ja4_hash12(
+		    original_ciphers ? original_ciphers : "",
+		    original_ciphers ? strlen(original_ciphers) : 0,
+		    orig_ciphers_hash);
+		if (ja4_exts_sigs_hash(original_exts, sig_algs, orig_exts_sigs_hash) != 0)
+			goto fail;
+		ja4_o_result = malloc(strlen(part_a) + 1 + JA4_HASH_LEN + 1 + JA4_HASH_LEN + 1);
 		if (ja4_o_result == NULL)
 			goto fail;
-		sprintf(ja4_o_result, "%s_%s_%s", first_chunk, orig_ciphers_hash, orig_exts_sigs_hash);
+		sprintf(ja4_o_result, "%s_%s_%s", part_a, orig_ciphers_hash, orig_exts_sigs_hash);
 	}
 
 	/* JA4_ro: raw original order */
-	{
-		size_t l = strlen(first_chunk) + 1 + (original_ciphers ? strlen(original_ciphers) : 0) + 1 +
-		    (original_exts ? strlen(original_exts) : 0) + 1 + (sig_algs && sig_algs[0] ? strlen(sig_algs) + 1 : 0) + 1;
-		ja4_ro_result = malloc(l);
-		if (ja4_ro_result == NULL)
-			goto fail;
-		if (sig_algs != NULL && sig_algs[0] != '\0')
-			sprintf(ja4_ro_result, "%s_%s_%s_%s", first_chunk,
-			    original_ciphers ? original_ciphers : "", original_exts ? original_exts : "", sig_algs);
-		else
-			sprintf(ja4_ro_result, "%s_%s_%s", first_chunk,
-			    original_ciphers ? original_ciphers : "", original_exts ? original_exts : "");
-	}
+	ja4_ro_result = ja4_build_raw(part_a, original_ciphers, original_exts, sig_algs);
+	if (ja4_ro_result == NULL)
+		goto fail;
 
 	REPLACE(tsp->ja4, ja4_result);
 	REPLACE(tsp->ja4_r, ja4_r_result);
