@@ -69,6 +69,20 @@ const char *VTLS_ja4_ro(const struct vrt_ctx *ctx);
 #define BERESP_CHECK_RET_0 BERESP_CHECK(0)
 #define BERESP_CHECK_RET_NULL BERESP_CHECK(NULL)
 
+#define VMOD_TLS_CLIENT_STRING(getter_call, name) \
+	do { \
+		if (!(ctx->method & VCL_MET_TASK_C)) { \
+			VRT_fail(ctx, "tls." name "() can only be used in client context"); \
+			return (NULL); \
+		} \
+		{ \
+			const char *_p = (getter_call); \
+			if (_p == NULL) \
+				return (NULL); \
+			return (WS_Copy(ctx->ws, _p, -1)); \
+		} \
+	} while (0)
+
 VCL_BOOL
 vmod_is_tls(VRT_CTX)
 {
@@ -91,86 +105,31 @@ vmod_version(VRT_CTX)
 VCL_STRING
 vmod_ja3(VRT_CTX)
 {
-	const char *ja3;
-
-	if (!(ctx->method & VCL_MET_TASK_C)) {
-		VRT_fail(ctx, "tls.ja3() can only be used in client context");
-		return (NULL);
-	}
-
-	ja3 = VTLS_ja3(ctx);
-	if (ja3 == NULL)
-		return (NULL);
-
-	return (WS_Copy(ctx->ws, ja3, -1));
+	VMOD_TLS_CLIENT_STRING(VTLS_ja3(ctx), "ja3");
 }
 
 VCL_STRING
 vmod_ja4(VRT_CTX)
 {
-	const char *ja4;
-
-	if (!(ctx->method & VCL_MET_TASK_C)) {
-		VRT_fail(ctx, "tls.ja4() can only be used in client context");
-		return (NULL);
-	}
-
-	ja4 = VTLS_ja4(ctx);
-	if (ja4 == NULL)
-		return (NULL);
-
-	return (WS_Copy(ctx->ws, ja4, -1));
+	VMOD_TLS_CLIENT_STRING(VTLS_ja4(ctx), "ja4");
 }
 
 VCL_STRING
 vmod_ja4_r(VRT_CTX)
 {
-	const char *ja4_r;
-
-	if (!(ctx->method & VCL_MET_TASK_C)) {
-		VRT_fail(ctx, "tls.ja4_r() can only be used in client context");
-		return (NULL);
-	}
-
-	ja4_r = VTLS_ja4_r(ctx);
-	if (ja4_r == NULL)
-		return (NULL);
-
-	return (WS_Copy(ctx->ws, ja4_r, -1));
+	VMOD_TLS_CLIENT_STRING(VTLS_ja4_r(ctx), "ja4_r");
 }
 
 VCL_STRING
 vmod_ja4_o(VRT_CTX)
 {
-	const char *ja4_o;
-
-	if (!(ctx->method & VCL_MET_TASK_C)) {
-		VRT_fail(ctx, "tls.ja4_o() can only be used in client context");
-		return (NULL);
-	}
-
-	ja4_o = VTLS_ja4_o(ctx);
-	if (ja4_o == NULL)
-		return (NULL);
-
-	return (WS_Copy(ctx->ws, ja4_o, -1));
+	VMOD_TLS_CLIENT_STRING(VTLS_ja4_o(ctx), "ja4_o");
 }
 
 VCL_STRING
 vmod_ja4_ro(VRT_CTX)
 {
-	const char *ja4_ro;
-
-	if (!(ctx->method & VCL_MET_TASK_C)) {
-		VRT_fail(ctx, "tls.ja4_ro() can only be used in client context");
-		return (NULL);
-	}
-
-	ja4_ro = VTLS_ja4_ro(ctx);
-	if (ja4_ro == NULL)
-		return (NULL);
-
-	return (WS_Copy(ctx->ws, ja4_ro, -1));
+	VMOD_TLS_CLIENT_STRING(VTLS_ja4_ro(ctx), "ja4_ro");
 }
 
 VCL_STRING

@@ -751,6 +751,7 @@ vtls_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 #define JA4_HASH_BUF		13	/* JA4_HASH_LEN + NUL */
 #define JA4_COUNT_CAP		99	/* cap for cipher/extension counts */
 #define JA4_PART_A_MAX		16	/* max length of Part A string */
+#define JA4_RESULT_MAX		(JA4_PART_A_MAX + 1 + JA4_HASH_LEN + 1 + JA4_HASH_LEN + 1)
 #define JA4_HEX_ITEM_MAX	5	/* max chars per comma-sep hex item (e.g. "abcd,") */
 
 /* JA4: first JA4_HASH_LEN hex chars of SHA256; empty input -> "000000000000". */
@@ -1185,10 +1186,14 @@ vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 		goto fail;
 
 	/* JA4: hashed sorted (Part A + Part B + Part C) */
-	ja4_result = malloc(strlen(part_a) + 1 + JA4_HASH_LEN + 1 + JA4_HASH_LEN + 1);
-	if (ja4_result == NULL)
-		goto fail;
-	sprintf(ja4_result, "%s_%s_%s", part_a, ciphers_hash, exts_sigs_hash);
+	{
+		char ja4_buf[JA4_RESULT_MAX];
+
+		sprintf(ja4_buf, "%s_%s_%s", part_a, ciphers_hash, exts_sigs_hash);
+		ja4_result = strdup(ja4_buf);
+		if (ja4_result == NULL)
+			goto fail;
+	}
 
 	/* JA4_r: raw sorted */
 	ja4_r_result = ja4_build_raw(part_a, sorted_ciphers, sorted_exts, sig_algs);
@@ -1199,6 +1204,7 @@ vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 	{
 		char orig_ciphers_hash[JA4_HASH_BUF];
 		char orig_exts_sigs_hash[JA4_HASH_BUF];
+		char ja4_o_buf[JA4_RESULT_MAX];
 
 		vtls_ja4_hash12(
 		    original_ciphers ? original_ciphers : "",
@@ -1206,10 +1212,10 @@ vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 		    orig_ciphers_hash);
 		if (ja4_exts_sigs_hash(original_exts, sig_algs, orig_exts_sigs_hash) != 0)
 			goto fail;
-		ja4_o_result = malloc(strlen(part_a) + 1 + JA4_HASH_LEN + 1 + JA4_HASH_LEN + 1);
+		sprintf(ja4_o_buf, "%s_%s_%s", part_a, orig_ciphers_hash, orig_exts_sigs_hash);
+		ja4_o_result = strdup(ja4_o_buf);
 		if (ja4_o_result == NULL)
 			goto fail;
-		sprintf(ja4_o_result, "%s_%s_%s", part_a, orig_ciphers_hash, orig_exts_sigs_hash);
 	}
 
 	/* JA4_ro: raw original order */
