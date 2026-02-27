@@ -31,11 +31,15 @@
  * TLS support (backend and client-side)
  */
 
+#include <stddef.h>
+#include <stdint.h>
+
 /* Forward declaration - OpenSSL types */
 typedef struct ssl_st SSL;
 
 struct mempool;
 struct pool;
+struct sess;
 struct vco;
 struct vrt_ctx;
 struct vsl_log;
@@ -89,6 +93,10 @@ struct vtls_sess {
 	char			*ja4_o;		/* JA4 hashed original-order fingerprint */
 	char			*ja4_ro;		/* JA4 raw original-order fingerprint */
 	void			*ja3_ja4_raw;	/* Parsed raw Client Hello for JA3/JA4 (freed after use) */
+	/* Lazy Client Hello: raw bytes in session ws; parse on first JA3/JA4 use */
+	unsigned char		*client_hello_buf;
+	size_t			client_hello_len;
+	uintptr_t		client_hello_ws_snapshot;
 	struct vtls_buf		*buf;		/* TLS record buffer */
 	void			*priv_local;	/* Pointer to listen_sock->tls */
 };
@@ -116,7 +124,7 @@ void VTLS_buf_free(struct vtls_buf **pbuf);
 void VTLS_buf_release(struct vtls_sess *tsp);
 
 /* Client-side TLS session management */
-void VTLS_del_sess(struct pool *pp, struct vtls_sess **ptsp);
+void VTLS_del_sess(struct pool *pp, struct vtls_sess **ptsp, struct sess *sp);
 void VTLS_vsl_set(struct vtls_sess *tsp, struct vsl_log *vsl);
 
 /* Certificate initialization (child process) */

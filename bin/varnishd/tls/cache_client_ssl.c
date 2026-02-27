@@ -114,7 +114,7 @@ struct vtls_options {
 };
 
 void
-VTLS_del_sess(struct pool *pp, struct vtls_sess **ptsp)
+VTLS_del_sess(struct pool *pp, struct vtls_sess **ptsp, struct sess *sp)
 {
 	struct vtls_sess *tsp;
 
@@ -127,6 +127,13 @@ VTLS_del_sess(struct pool *pp, struct vtls_sess **ptsp)
 	free(tsp->ja4_o);
 	free(tsp->ja4_ro);
 	VTLS_fingerprint_raw_free(&tsp->ja3_ja4_raw);
+
+	/* Release lazy Client Hello buffer from session workspace */
+	if (tsp->client_hello_buf != NULL && sp != NULL)
+		WS_Reset(sp->ws, tsp->client_hello_ws_snapshot);
+	tsp->client_hello_buf = NULL;
+	tsp->client_hello_len = 0;
+	tsp->client_hello_ws_snapshot = 0;
 
 	if (tsp->buf != NULL)
 		VTLS_buf_free(&tsp->buf);
@@ -640,6 +647,8 @@ vtls_msg_cb(int write_p, int version, int content_type, const void *buf,
 {
 	struct sess *sp;
 	struct vtls_sess *tsp;
+	unsigned char *copy;
+	uintptr_t sn;
 
 	(void)version;
 	(void)arg;
@@ -653,9 +662,21 @@ vtls_msg_cb(int write_p, int version, int content_type, const void *buf,
 	tsp = sp->tls;
 	if (tsp == NULL || tsp->magic != VTLS_SESS_MAGIC)
 		return;
-	if (tsp->ja3_ja4_raw != NULL)
-		VTLS_fingerprint_raw_free(&tsp->ja3_ja4_raw);
-	(void)VTLS_fingerprint_parse_clienthello(buf, len, &tsp->ja3_ja4_raw);
+	/* Release any previous lazy Client Hello buffer */
+	if (tsp->client_hello_buf != NULL) {
+		WS_Reset(sp->ws, tsp->client_hello_ws_snapshot);
+		tsp->client_hello_buf = NULL;
+		tsp->client_hello_len = 0;
+		tsp->client_hello_ws_snapshot = 0;
+	}
+	sn = WS_Snapshot(sp->ws);
+	copy = WS_Alloc(sp->ws, len);
+	if (copy == NULL)
+		return;
+	memcpy(copy, buf, len);
+	tsp->client_hello_buf = copy;
+	tsp->client_hello_len = len;
+	tsp->client_hello_ws_snapshot = sn;
 }
 
 static int
@@ -681,6 +702,16 @@ vtls_clienthello_cb(SSL *ssl, int *al, void *priv)
 	protos = tls->protos;
 	if (protos == 0)
 		protos = heritage.tls->protos;
+
+	/* Lazy: parse raw Client Hello on first use */
+	if (tsp->client_hello_buf != NULL) {
+		(void)VTLS_fingerprint_parse_clienthello(tsp->client_hello_buf,
+		    tsp->client_hello_len, &tsp->ja3_ja4_raw);
+		WS_Reset(sp->ws, tsp->client_hello_ws_snapshot);
+		tsp->client_hello_buf = NULL;
+		tsp->client_hello_len = 0;
+		tsp->client_hello_ws_snapshot = 0;
+	}
 
 	if (cache_param->tls_ja3 && VTLS_fingerprint_get_ja3(ssl, sp, tsp) != 0)
 		return (SSL_CLIENT_HELLO_ERROR);
