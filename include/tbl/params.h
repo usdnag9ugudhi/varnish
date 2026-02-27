@@ -1120,12 +1120,47 @@ PARAM_SIMPLE(
 	/* def */	"off",
 	/* units */	"bool",
 	/* descr */
-	"Enable JA4 TLS client fingerprinting for incoming TLS connections. "
-	"When enabled, JA4 fingerprint strings can be accessed via the tls "
-	"VMOD: tls.ja4() (hashed, sorted), tls.ja4_r() (raw, sorted), "
-	"tls.ja4_o() (hashed, original order), tls.ja4_ro() (raw, original "
-	"order). The fingerprints can be used for client identification and "
-	"classification."
+	"Enable JA4 TLS client fingerprint (hashed, sorted) for incoming TLS "
+	"connections. When enabled, tls.ja4() returns the fingerprint. "
+	"Computed on first use. See also tls_ja4_r, tls_ja4_o, tls_ja4_ro."
+)
+
+PARAM_SIMPLE(
+	/* name */	tls_ja4_r,
+	/* type */	boolean,
+	/* min */	NULL,
+	/* max */	NULL,
+	/* def */	"off",
+	/* units */	"bool",
+	/* descr */
+	"Enable JA4 raw fingerprint (sorted) for incoming TLS connections. "
+	"When enabled, tls.ja4_r() returns the fingerprint. Computed on first use."
+)
+
+PARAM_SIMPLE(
+	/* name */	tls_ja4_o,
+	/* type */	boolean,
+	/* min */	NULL,
+	/* max */	NULL,
+	/* def */	"off",
+	/* units */	"bool",
+	/* descr */
+	"Enable JA4 fingerprint (hashed, original order) for incoming TLS "
+	"connections. When enabled, tls.ja4_o() returns the fingerprint. "
+	"Computed on first use."
+)
+
+PARAM_SIMPLE(
+	/* name */	tls_ja4_ro,
+	/* type */	boolean,
+	/* min */	NULL,
+	/* max */	NULL,
+	/* def */	"off",
+	/* units */	"bool",
+	/* descr */
+	"Enable JA4 raw fingerprint (original order) for incoming TLS "
+	"connections. When enabled, tls.ja4_ro() returns the fingerprint. "
+	"Computed on first use."
 )
 
 PARAM_SIMPLE(

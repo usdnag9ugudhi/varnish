@@ -295,8 +295,8 @@ vtls_get_ja3_from_raw(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
 	return (0);
 }
 
-static int
-vtls_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
+int
+VTLS_fingerprint_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
 {
 	(void)ssl;
 	if (tsp->ja3_ja4_raw == NULL)
@@ -368,12 +368,14 @@ cmp_int(const void *a, const void *b)
 	return (x < y ? -1 : (x > y ? 1 : 0));
 }
 
-/* Format array as comma-separated hex string in workspace. */
+/* Format array as comma-sep hex in workspace. kind: 0 = uint16 as %04x, 1 = int as %04x, 2 = uint16 as %02x%02x (sig_algs). */
 static char *
-ja4_format_hex_list_uint16(struct ws *ws, const uint16_t *arr, size_t n)
+ja4_fmt_hex_list(struct ws *ws, int kind, const void *arr, size_t n)
 {
 	size_t buf_len, off, i;
 	char *buf;
+	const uint16_t *u16 = arr;
+	const int *i32 = arr;
 
 	if (n == 0)
 		return (NULL);
@@ -382,48 +384,18 @@ ja4_format_hex_list_uint16(struct ws *ws, const uint16_t *arr, size_t n)
 	if (buf == NULL)
 		return (NULL);
 	off = 0;
-	for (i = 0; i < n; i++)
-		off += (size_t)snprintf(buf + off, buf_len - off, "%s%04x",
-		    i > 0 ? "," : "", arr[i]);
-	return (buf);
-}
-
-static char *
-ja4_format_hex_list_int(struct ws *ws, const int *arr, size_t n)
-{
-	size_t buf_len, off, i;
-	char *buf;
-
-	if (n == 0)
-		return (NULL);
-	buf_len = n * JA4_HEX_ITEM_MAX;
-	buf = WS_Alloc(ws, buf_len);
-	if (buf == NULL)
-		return (NULL);
-	off = 0;
-	for (i = 0; i < n; i++)
-		off += (size_t)snprintf(buf + off, buf_len - off, "%s%04x",
-		    i > 0 ? "," : "", arr[i]);
-	return (buf);
-}
-
-/* Format uint16 array as comma-sep byte pairs (high byte first) for JA4 sig_algs. */
-static char *
-ja4_format_hex_list_sig_algs(struct ws *ws, const uint16_t *arr, size_t n)
-{
-	size_t buf_len, off, i;
-	char *buf;
-
-	if (n == 0)
-		return (NULL);
-	buf_len = n * JA4_HEX_ITEM_MAX;
-	buf = WS_Alloc(ws, buf_len);
-	if (buf == NULL)
-		return (NULL);
-	off = 0;
-	for (i = 0; i < n; i++)
-		off += (size_t)snprintf(buf + off, buf_len - off, "%s%02x%02x",
-		    i > 0 ? "," : "", (arr[i] >> 8) & 0xff, arr[i] & 0xff);
+	for (i = 0; i < n; i++) {
+		if (kind == 0)
+			off += (size_t)snprintf(buf + off, buf_len - off,
+			    "%s%04x", i > 0 ? "," : "", u16[i]);
+		else if (kind == 1)
+			off += (size_t)snprintf(buf + off, buf_len - off,
+			    "%s%04x", i > 0 ? "," : "", i32[i]);
+		else
+			off += (size_t)snprintf(buf + off, buf_len - off,
+			    "%s%02x%02x", i > 0 ? "," : "",
+			    (u16[i] >> 8) & 0xff, u16[i] & 0xff);
+	}
 	return (buf);
 }
 
@@ -439,60 +411,37 @@ ja4_format_hex_list_sig_algs(struct ws *ws, const uint16_t *arr, size_t n)
 #define DTLS1_3_WIRE	0xfefc
 
 static const char *
-ja4_version_str(uint16_t v)
+ja4_version_str(uint16_t wire)
 {
-	switch (v) {
-	case TLS1_3_WIRE:  return "13";
-	case TLS1_2_WIRE:  return "12";
-	case TLS1_1_WIRE:  return "11";
-	case TLS1_0_WIRE:  return "10";
-	case SSL3_WIRE:    return "s3";
-	case SSL2_WIRE:    return "s2";
-	case DTLS1_0_WIRE: return "d1";
-	case DTLS1_2_WIRE: return "d2";
-	case DTLS1_3_WIRE: return "d3";
-	default: return "00";
+	switch (wire) {
+	case TLS1_3_WIRE:  return ("13");
+	case TLS1_2_WIRE:  return ("12");
+	case TLS1_1_WIRE:  return ("11");
+	case TLS1_0_WIRE:  return ("10");
+	case SSL3_WIRE:    return ("s3");
+	case SSL2_WIRE:    return ("s2");
+	case DTLS1_0_WIRE: return ("d1");
+	case DTLS1_2_WIRE: return ("d2");
+	case DTLS1_3_WIRE: return ("d3");
+	default: return ("00");
 	}
 }
 
-static const char *
-ja4_version_str_from_raw(const struct ja3_ja4_raw_ch *raw)
-{
-	const unsigned char *sv;
-	size_t sv_len, off, vi;
-	uint16_t v, vmax;
-
-	if (raw->supported_versions == NULL || raw->supported_versions_len < 2)
-		return (ja4_version_str(raw->legacy_version));
-	sv = raw->supported_versions;
-	sv_len = raw->supported_versions_len;
-	off = (sv_len >= 3 && (size_t)sv[0] == sv_len - 1) ? 1 : 0;
-	vmax = 0;
-	for (vi = off; vi + 2 <= sv_len; vi += 2) {
-		v = vbe16dec(sv + vi);
-		if (!IS_GREASE_TLS(v) && v > vmax)
-			vmax = v;
-	}
-	if (vmax != 0)
-		return (ja4_version_str(vmax));
-	return (ja4_version_str(raw->legacy_version));
-}
-
+/* Set first and last character of first ALPN entry; default '0','0'. */
 static void
-ja4_alpn_first_last_raw(const unsigned char *alpn_data, size_t alpn_len,
-    char *alpn_first, char *alpn_last)
+ja4_alpn_first_last(const struct ja3_ja4_raw_ch *raw, char *first, char *last)
 {
-	size_t list_len, proto_len;
-	const unsigned char *proto;
-	size_t hi;
+	const unsigned char *alpn_data, *proto;
+	size_t list_len, proto_len, i;
 	char hex_buf[512];
 
-	*alpn_first = '0';
-	*alpn_last = '0';
-	if (alpn_data == NULL || alpn_len < ALPN_FIRST_PROTO_OFFSET)
+	*first = '0';
+	*last = '0';
+	alpn_data = raw->alpn;
+	if (alpn_data == NULL || raw->alpn_len < ALPN_FIRST_PROTO_OFFSET)
 		return;
 	list_len = vbe16dec(alpn_data + ALPN_LIST_LEN_OFFSET);
-	if (list_len == 0 || list_len > alpn_len - ALPN_FIRST_PROTO_LEN_OFFSET)
+	if (list_len == 0 || list_len > raw->alpn_len - ALPN_FIRST_PROTO_LEN_OFFSET)
 		return;
 	proto_len = alpn_data[ALPN_FIRST_PROTO_LEN_OFFSET];
 	if (proto_len == 0 || proto_len > list_len - 1)
@@ -502,284 +451,207 @@ ja4_alpn_first_last_raw(const unsigned char *alpn_data, size_t alpn_len,
 		return;
 	if (isalnum((unsigned char)proto[0]) &&
 	    isalnum((unsigned char)proto[proto_len - 1])) {
-		*alpn_first = (char)proto[0];
-		*alpn_last = (char)proto[proto_len - 1];
+		*first = (char)proto[0];
+		*last = (char)proto[proto_len - 1];
 		return;
 	}
-	for (hi = 0; hi < proto_len; hi++) {
-		hex_buf[2 * hi] = "0123456789abcdef"[proto[hi] >> 4];
-		hex_buf[2 * hi + 1] = "0123456789abcdef"[proto[hi] & 0xf];
+	for (i = 0; i < proto_len; i++) {
+		hex_buf[2 * i] = "0123456789abcdef"[proto[i] >> 4];
+		hex_buf[2 * i + 1] = "0123456789abcdef"[proto[i] & 0xf];
 	}
 	hex_buf[proto_len * 2] = '\0';
-	*alpn_first = hex_buf[0];
-	*alpn_last = (proto_len * 2 > 1 ? hex_buf[proto_len * 2 - 1] : hex_buf[0]);
-}
-
-static int
-ja4_build_cipher_list_raw(struct ws *ws, const unsigned char *cipher_list,
-    size_t cipher_list_len, int sorted, char **out)
-{
-	size_t cipher_count, ci, cj;
-	uint16_t *ciphers;
-
-	cipher_count = 0;
-	for (ci = 0; ci + 2 <= cipher_list_len; ci += 2) {
-		if (!IS_GREASE_TLS(vbe16dec(cipher_list + ci)))
-			cipher_count++;
-	}
-	*out = WS_Alloc(ws, 1);
-	if (*out == NULL)
-		return (-1);
-	**out = '\0';
-	if (cipher_count == 0)
-		return (0);
-	ciphers = WS_Alloc(ws, cipher_count * sizeof(uint16_t));
-	if (ciphers == NULL)
-		return (-1);
-	for (ci = 0, cj = 0; ci + 2 <= cipher_list_len; ci += 2) {
-		uint16_t c = vbe16dec(cipher_list + ci);
-		if (!IS_GREASE_TLS(c))
-			ciphers[cj++] = c;
-	}
-	if (sorted)
-		qsort(ciphers, cipher_count, sizeof(uint16_t), cmp_uint16);
-	*out = ja4_format_hex_list_uint16(ws, ciphers, cipher_count);
-	return (*out == NULL ? -1 : 0);
-}
-
-static int
-ja4_build_sig_algs_str_raw(struct ws *ws, const unsigned char *sig_alg_data,
-    size_t sig_alg_len, char **out)
-{
-	uint16_t sig_alg_list_len;
-	size_t si, n, sj;
-	uint16_t *sigs;
-
-	*out = WS_Alloc(ws, 1);
-	if (*out == NULL)
-		return (-1);
-	**out = '\0';
-	if (sig_alg_data == NULL || sig_alg_len < 2)
-		return (0);
-	sig_alg_list_len = vbe16dec(sig_alg_data);
-	n = 0;
-	for (si = 2; si + 2 <= 2 + (size_t)sig_alg_list_len && si + 2 <= sig_alg_len;
-	    si += 2) {
-		if (!IS_GREASE_TLS(vbe16dec(sig_alg_data + si)))
-			n++;
-	}
-	if (n == 0)
-		return (0);
-	sigs = WS_Alloc(ws, n * sizeof(uint16_t));
-	if (sigs == NULL)
-		return (-1);
-	for (si = 2, sj = 0; si + 2 <= 2 + (size_t)sig_alg_list_len && si + 2 <= sig_alg_len;
-	    si += 2) {
-		uint16_t sa = vbe16dec(sig_alg_data + si);
-		if (!IS_GREASE_TLS(sa))
-			sigs[sj++] = sa;
-	}
-	*out = ja4_format_hex_list_sig_algs(ws, sigs, n);
-	return (*out == NULL ? -1 : 0);
-}
-
-static int
-ja4_build_exts_list(struct ws *ws, const int *ext_types, size_t ext_count_total,
-    int sorted, int exclude_sni_alpn, char **out)
-{
-	size_t ext_count;
-	size_t ei, ej;
-	int *exts;
-
-	ext_count = 0;
-	for (ei = 0; ei < ext_count_total; ei++) {
-		if (!IS_GREASE_TLS(ext_types[ei]) &&
-		    (!exclude_sni_alpn ||
-		    (ext_types[ei] != TLSEXT_TYPE_server_name &&
-		    ext_types[ei] != TLSEXT_TYPE_alpn)))
-			ext_count++;
-	}
-	*out = WS_Alloc(ws, 1);
-	if (*out == NULL)
-		return (-1);
-	**out = '\0';
-	if (ext_count == 0)
-		return (0);
-	exts = WS_Alloc(ws, ext_count * sizeof(int));
-	if (exts == NULL)
-		return (-1);
-	for (ei = 0, ej = 0; ei < ext_count_total; ei++) {
-		if (!IS_GREASE_TLS(ext_types[ei]) &&
-		    (!exclude_sni_alpn ||
-		    (ext_types[ei] != TLSEXT_TYPE_server_name &&
-		    ext_types[ei] != TLSEXT_TYPE_alpn)))
-			exts[ej++] = ext_types[ei];
-	}
-	if (sorted)
-		qsort(exts, ext_count, sizeof(int), cmp_int);
-	*out = ja4_format_hex_list_int(ws, exts, ext_count);
-	return (*out == NULL ? -1 : 0);
-}
-
-static int
-ja4_exts_sigs_hash(struct ws *ws, const char *exts_str, const char *sig_algs,
-    char out[JA4_HASH_BUF])
-{
-	size_t exts_len, sig_len, total;
-	char *combined = NULL;
-
-	exts_len = strlen_safe(exts_str);
-	sig_len = strlen_safe(sig_algs);
-
-	if (exts_len == 0 && sig_len == 0) {
-		vtls_ja4_hash12("", 0, out);
-		return (0);
-	}
-	total = exts_len + (sig_len > 0 ? 1 + sig_len : 0);
-	combined = WS_Alloc(ws, total + 1);
-	if (combined == NULL)
-		return (-1);
-	if (exts_len > 0)
-		memcpy(combined, exts_str, exts_len + 1);
-	else
-		combined[0] = '\0';
-	if (sig_len > 0) {
-		strcat(combined, "_");
-		strcat(combined, sig_algs);
-	}
-	vtls_ja4_hash12(combined, total, out);
-	return (0);
-}
-
-static char *
-ja4_build_raw(struct ws *ws, const char *part_a, const char *ciphers_str,
-    const char *exts_str, const char *sig_algs)
-{
-	size_t l;
-	size_t cipher_len, exts_len, sig_len;
-	char *out;
-
-	cipher_len = strlen_safe(ciphers_str);
-	exts_len = strlen_safe(exts_str);
-	sig_len = strlen_safe(sig_algs);
-
-	l = strlen(part_a) + 1 + cipher_len + 1 + exts_len + 1;
-	if (sig_len > 0)
-		l += 1 + sig_len;
-	l++;
-
-	out = WS_Alloc(ws, l);
-	if (out == NULL)
-		return (NULL);
-	if (sig_len > 0)
-		sprintf(out, "%s_%s_%s_%s", part_a,
-		    ciphers_str ? ciphers_str : "", exts_str ? exts_str : "", sig_algs);
-	else
-		sprintf(out, "%s_%s_%s", part_a,
-		    ciphers_str ? ciphers_str : "", exts_str ? exts_str : "");
-	return (out);
-}
-
-static void
-ja4_build_part_a(const struct ja3_ja4_raw_ch *raw, char part_a[JA4_PART_A_MAX])
-{
-	unsigned nr_exts_raw, nr_ciphers, nr_exts;
-	size_t ei, ci;
-	const char *tls_version_str;
-	char sni_marker, alpn_first, alpn_last;
-
-	nr_exts_raw = 0;
-	for (ei = 0; ei < raw->ext_count; ei++) {
-		if (!IS_GREASE_TLS(raw->ext_types[ei]))
-			nr_exts_raw++;
-	}
-	nr_ciphers = 0;
-	for (ci = 0; ci + 2 <= raw->cipher_len; ci += 2) {
-		if (!IS_GREASE_TLS(vbe16dec(raw->ciphers + ci)))
-			nr_ciphers++;
-	}
-	nr_ciphers = (nr_ciphers > JA4_COUNT_CAP) ? JA4_COUNT_CAP : (unsigned)nr_ciphers;
-	nr_exts = (nr_exts_raw > JA4_COUNT_CAP) ? JA4_COUNT_CAP : nr_exts_raw;
-
-	tls_version_str = ja4_version_str_from_raw(raw);
-	sni_marker = raw->has_sni ? 'd' : 'i';
-	ja4_alpn_first_last_raw(raw->alpn, raw->alpn_len, &alpn_first, &alpn_last);
-
-	sprintf(part_a, "t%s%c%02u%02u%c%c", tls_version_str, sni_marker,
-	    nr_ciphers, nr_exts, alpn_first, alpn_last);
-}
-
-static char *
-ja4_build_hashed_result(struct ws *ws, const char *part_a,
-    const char *ciphers_str, const char *exts_str, const char *sig_algs)
-{
-	char ciphers_hash[JA4_HASH_BUF];
-	char exts_sigs_hash[JA4_HASH_BUF];
-	char ja4_buf[JA4_RESULT_MAX];
-	size_t cipher_len;
-
-	cipher_len = strlen_safe(ciphers_str);
-	vtls_ja4_hash12(ciphers_str ? ciphers_str : "", cipher_len, ciphers_hash);
-	if (ja4_exts_sigs_hash(ws, exts_str, sig_algs, exts_sigs_hash) != 0)
-		return (NULL);
-	sprintf(ja4_buf, "%s_%s_%s", part_a, ciphers_hash, exts_sigs_hash);
-	return (WS_Copy(ws, ja4_buf, -1));
+	*first = hex_buf[0];
+	*last = (proto_len * 2 > 1 ? hex_buf[proto_len * 2 - 1] : hex_buf[0]);
 }
 
 /*
- * Run one JA4 phase: build the intermediates for that variant and store
- * the result in the matching tsp field. Uses session workspace with
- * WS_Reset after each variant so peak usage stays low. REPLACE strdups
- * the result so it survives the reset.
+ * Build one JA4 variant from the parsed Client Hello and store it in tsp.
+ * JA4 = part A (version, SNI, counts, ALPN) + part B (ciphers) + part C (exts+sigs).
+ * Sorted variants (ja4, ja4_r) use sorted order; hashed variants (ja4, ja4_o) use
+ * 12-char hash; raw variants (ja4_r, ja4_ro) use comma-sep hex. One variant per call.
  */
 static int
 vtls_get_ja4_one_variant(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
     struct vtls_sess *tsp, enum vtls_ja4_variant variant)
 {
 	struct ws *ws;
-	char part_a[JA4_PART_A_MAX];
-	char *ciphers = NULL;
-	char *exts = NULL;
-	char *sig_algs = NULL;
-	char *result = NULL;
 	uintptr_t sn;
-	int sorted;
+	uint16_t wire, vmax;
+	size_t ci, cj, ei, ej, si, sj, n_ciphers, n_exts, n_sig;
+	size_t exts_len, sig_len, total, result_len;
+	const unsigned char *sv;
+	unsigned n_ciphers_u, n_exts_u;
+	char part_a[JA4_PART_A_MAX];
+	char ja4_buf[JA4_RESULT_MAX];
+	char *ciphers_str, *exts_str, *sig_algs_str;
+	char ciphers_hash[JA4_HASH_BUF], exts_sigs_hash[JA4_HASH_BUF];
+	char *combined, *result;
+	uint16_t *ciphers;
+	int *exts;
+	uint16_t *sigs;
+	int do_sort, do_hash;
+	char alpn_first, alpn_last;
 
 	ws = sp->ws;
 	sn = WS_Snapshot(ws);
-	ja4_build_part_a(raw, part_a);
+	do_sort = (variant <= VTLS_JA4_R);
+	do_hash = ((variant & 1) == 0);
 
-	/* MAIN,R = sorted; O,RO = original. MAIN,O = hashed; R,RO = raw. */
-	sorted = (variant <= VTLS_JA4_R);
-	if (ja4_build_cipher_list_raw(ws, raw->ciphers, raw->cipher_len,
-	    sorted, &ciphers) != 0)
-		goto fail;
-	if (ja4_build_exts_list(ws, raw->ext_types, raw->ext_count,
-	    sorted, sorted, &exts) != 0)
-		goto fail;
-	if (ja4_build_sig_algs_str_raw(ws, raw->sig_algs, raw->sig_algs_len,
-	    &sig_algs) != 0)
-		goto fail;
+	/* Step 1: version (from supported_versions or legacy). */
+	if (raw->supported_versions != NULL && raw->supported_versions_len >= 2) {
+		size_t off;
+		uint16_t v;
+		sv = raw->supported_versions;
+		off = (raw->supported_versions_len >= 3 &&
+		    (size_t)sv[0] == raw->supported_versions_len - 1) ? 1 : 0;
+		vmax = 0;
+		for (; off + 2 <= raw->supported_versions_len; off += 2) {
+			v = vbe16dec(sv + off);
+			if (!IS_GREASE_TLS(v) && v > vmax)
+				vmax = v;
+		}
+		wire = (vmax != 0) ? vmax : raw->legacy_version;
+	} else
+		wire = raw->legacy_version;
 
-	result = (variant & 1) == 0
-	    ? ja4_build_hashed_result(ws, part_a, ciphers, exts, sig_algs)
-	    : ja4_build_raw(ws, part_a, ciphers, exts, sig_algs);
+	/* Step 2: cipher and extension counts (non-GREASE, cap at 99), SNI, ALPN. */
+	n_ciphers_u = 0;
+	for (ci = 0; ci + 2 <= raw->cipher_len; ci += 2) {
+		if (!IS_GREASE_TLS(vbe16dec(raw->ciphers + ci)))
+			n_ciphers_u++;
+	}
+	n_exts_u = 0;
+	for (ei = 0; ei < raw->ext_count; ei++) {
+		if (!IS_GREASE_TLS(raw->ext_types[ei]))
+			n_exts_u++;
+	}
+	if (n_ciphers_u > JA4_COUNT_CAP)
+		n_ciphers_u = JA4_COUNT_CAP;
+	if (n_exts_u > JA4_COUNT_CAP)
+		n_exts_u = JA4_COUNT_CAP;
+	ja4_alpn_first_last(raw, &alpn_first, &alpn_last);
+	sprintf(part_a, "t%s%c%02u%02u%c%c", ja4_version_str(wire),
+	    raw->has_sni ? 'd' : 'i', n_ciphers_u, n_exts_u, alpn_first, alpn_last);
+
+	/* Step 3: cipher list (non-GREASE, optionally sorted), as hex string. */
+	n_ciphers = 0;
+	for (ci = 0; ci + 2 <= raw->cipher_len; ci += 2) {
+		if (!IS_GREASE_TLS(vbe16dec(raw->ciphers + ci)))
+			n_ciphers++;
+	}
+	ciphers_str = NULL;
+	if (n_ciphers > 0) {
+		ciphers = WS_Alloc(ws, n_ciphers * sizeof(uint16_t));
+		if (ciphers == NULL)
+			goto fail;
+		for (ci = 0, cj = 0; ci + 2 <= raw->cipher_len; ci += 2) {
+			uint16_t c = vbe16dec(raw->ciphers + ci);
+			if (!IS_GREASE_TLS(c))
+				ciphers[cj++] = c;
+		}
+		if (do_sort)
+			qsort(ciphers, n_ciphers, sizeof(uint16_t), cmp_uint16);
+		ciphers_str = ja4_fmt_hex_list(ws, 0, ciphers, n_ciphers);
+		if (ciphers_str == NULL)
+			goto fail;
+	}
+
+	/* Step 4: extension list (exclude SNI and ALPN), optionally sorted, as hex. */
+	n_exts = 0;
+	for (ei = 0; ei < raw->ext_count; ei++) {
+		if (!IS_GREASE_TLS(raw->ext_types[ei]) &&
+		    raw->ext_types[ei] != TLSEXT_TYPE_server_name &&
+		    raw->ext_types[ei] != TLSEXT_TYPE_alpn)
+			n_exts++;
+	}
+	exts_str = NULL;
+	if (n_exts > 0) {
+		exts = WS_Alloc(ws, n_exts * sizeof(int));
+		if (exts == NULL)
+			goto fail;
+		for (ei = 0, ej = 0; ei < raw->ext_count; ei++) {
+			if (!IS_GREASE_TLS(raw->ext_types[ei]) &&
+			    raw->ext_types[ei] != TLSEXT_TYPE_server_name &&
+			    raw->ext_types[ei] != TLSEXT_TYPE_alpn)
+				exts[ej++] = raw->ext_types[ei];
+		}
+		if (do_sort)
+			qsort(exts, n_exts, sizeof(int), cmp_int);
+		exts_str = ja4_fmt_hex_list(ws, 1, exts, n_exts);
+		if (exts_str == NULL)
+			goto fail;
+	}
+
+	/* Step 5: signature algorithms as hex string. */
+	sig_algs_str = NULL;
+	if (raw->sig_algs != NULL && raw->sig_algs_len >= 2) {
+		uint16_t list_len = vbe16dec(raw->sig_algs);
+		n_sig = 0;
+		for (si = 2; si + 2 <= 2 + (size_t)list_len && si + 2 <= raw->sig_algs_len; si += 2) {
+			if (!IS_GREASE_TLS(vbe16dec(raw->sig_algs + si)))
+				n_sig++;
+		}
+		if (n_sig > 0) {
+			sigs = WS_Alloc(ws, n_sig * sizeof(uint16_t));
+			if (sigs == NULL)
+				goto fail;
+			for (si = 2, sj = 0; si + 2 <= 2 + (size_t)list_len && si + 2 <= raw->sig_algs_len; si += 2) {
+				uint16_t sa = vbe16dec(raw->sig_algs + si);
+				if (!IS_GREASE_TLS(sa))
+					sigs[sj++] = sa;
+			}
+			sig_algs_str = ja4_fmt_hex_list(ws, 2, sigs, n_sig);
+			if (sig_algs_str == NULL)
+				goto fail;
+		}
+	}
+
+	/* Step 6: build result — hashed (part_a + hash(B) + hash(C)) or raw. */
+	if (do_hash) {
+		vtls_ja4_hash12(ciphers_str ? ciphers_str : "", strlen_safe(ciphers_str), ciphers_hash);
+		exts_len = strlen_safe(exts_str);
+		sig_len = strlen_safe(sig_algs_str);
+		if (exts_len == 0 && sig_len == 0) {
+			vtls_ja4_hash12("", 0, exts_sigs_hash);
+		} else {
+			total = exts_len + (sig_len > 0 ? 1 + sig_len : 0);
+			combined = WS_Alloc(ws, total + 1);
+			if (combined == NULL)
+				goto fail;
+			if (exts_len > 0)
+				memcpy(combined, exts_str, exts_len + 1);
+			else
+				combined[0] = '\0';
+			if (sig_len > 0) {
+				strcat(combined, "_");
+				strcat(combined, sig_algs_str);
+			}
+			vtls_ja4_hash12(combined, total, exts_sigs_hash);
+		}
+		sprintf(ja4_buf, "%s_%s_%s", part_a, ciphers_hash, exts_sigs_hash);
+		result = WS_Copy(ws, ja4_buf, -1);
+	} else {
+		result_len = strlen(part_a) + 1 + strlen_safe(ciphers_str) + 1 + strlen_safe(exts_str) + 1;
+		if (strlen_safe(sig_algs_str) > 0)
+			result_len += 1 + strlen_safe(sig_algs_str);
+		result_len++;
+		result = WS_Alloc(ws, result_len);
+		if (result == NULL)
+			goto fail;
+		if (strlen_safe(sig_algs_str) > 0)
+			sprintf(result, "%s_%s_%s_%s", part_a,
+			    ciphers_str ? ciphers_str : "", exts_str ? exts_str : "", sig_algs_str);
+		else
+			sprintf(result, "%s_%s_%s", part_a,
+			    ciphers_str ? ciphers_str : "", exts_str ? exts_str : "");
+	}
 	if (result == NULL)
 		goto fail;
-
 	switch (variant) {
-	case VTLS_JA4_MAIN:
-		REPLACE(tsp->ja4, result);
-		break;
-	case VTLS_JA4_R:
-		REPLACE(tsp->ja4_r, result);
-		break;
-	case VTLS_JA4_O:
-		REPLACE(tsp->ja4_o, result);
-		break;
-	case VTLS_JA4_RO:
-		REPLACE(tsp->ja4_ro, result);
-		break;
+	case VTLS_JA4_MAIN: REPLACE(tsp->ja4, result); break;
+	case VTLS_JA4_R:   REPLACE(tsp->ja4_r, result); break;
+	case VTLS_JA4_O:   REPLACE(tsp->ja4_o, result); break;
+	case VTLS_JA4_RO:  REPLACE(tsp->ja4_ro, result); break;
 	}
 	WS_Reset(ws, sn);
 	return (0);
@@ -794,46 +666,16 @@ int
 VTLS_fingerprint_get_ja4_variant(struct sess *sp, struct vtls_sess *tsp,
     enum vtls_ja4_variant variant)
 {
-	char **field;
-
 	if (tsp->ja3_ja4_raw == NULL)
 		return (-1);
 	switch (variant) {
-	case VTLS_JA4_MAIN: field = &tsp->ja4; break;
-	case VTLS_JA4_R:   field = &tsp->ja4_r; break;
-	case VTLS_JA4_O:   field = &tsp->ja4_o; break;
-	case VTLS_JA4_RO:  field = &tsp->ja4_ro; break;
+	case VTLS_JA4_MAIN: if (tsp->ja4 != NULL) return (0); break;
+	case VTLS_JA4_R:   if (tsp->ja4_r != NULL) return (0); break;
+	case VTLS_JA4_O:   if (tsp->ja4_o != NULL) return (0); break;
+	case VTLS_JA4_RO:  if (tsp->ja4_ro != NULL) return (0); break;
 	default: return (-1);
 	}
-	if (*field != NULL)
-		return (0);
 	return (vtls_get_ja4_one_variant(tsp->ja3_ja4_raw, sp, tsp, variant));
-}
-
-/*
- * Compute all four JA4 variants one at a time with WS_Reset between each
- * so peak workspace stays low (one variant's intermediates only).
- */
-static int
-vtls_get_ja4_from_raw(const struct ja3_ja4_raw_ch *raw, struct sess *sp,
-    struct vtls_sess *tsp)
-{
-	enum vtls_ja4_variant v;
-
-	for (v = VTLS_JA4_MAIN; v <= VTLS_JA4_RO; v++) {
-		if (vtls_get_ja4_one_variant(raw, sp, tsp, v) != 0)
-			return (1);
-	}
-	return (0);
-}
-
-static int
-vtls_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
-{
-	(void)ssl;
-	if (tsp->ja3_ja4_raw == NULL)
-		return (0);
-	return (vtls_get_ja4_from_raw(tsp->ja3_ja4_raw, sp, tsp));
 }
 
 void
@@ -863,16 +705,4 @@ VTLS_fingerprint_parse_clienthello(const unsigned char *buf, size_t len,
 	}
 	*out_raw = raw;
 	return (0);
-}
-
-int
-VTLS_fingerprint_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
-{
-	return (vtls_get_ja3(ssl, sp, tsp));
-}
-
-int
-VTLS_fingerprint_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp)
-{
-	return (vtls_get_ja4(ssl, sp, tsp));
 }

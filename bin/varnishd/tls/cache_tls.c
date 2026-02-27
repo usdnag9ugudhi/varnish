@@ -498,14 +498,17 @@ name(const struct vrt_ctx *ctx)						\
 	return (tsp->member);						\
 }
 
-/* JA4: compute only the requested variant on first use (needs ctx->sp). */
-#define VTLS_JA4_ACCESSOR(name, member, variant)			\
+/* JA4: each variant is computed on demand when its param is on and VCL calls
+ * the corresponding getter (tls.ja4(), tls.ja4_r(), etc.). Only that variant
+ * is computed; enable params only for the fingerprints you need.
+ */
+#define VTLS_JA4_ACCESSOR(name, member, variant, param_on)		\
 const char *								\
 name(const struct vrt_ctx *ctx)						\
 {									\
 	struct vtls_sess *tsp;						\
 	tsp = vtls_get_sess(ctx);					\
-	if (tsp == NULL)						\
+	if (tsp == NULL || !(param_on))					\
 		return (NULL);						\
 	if (tsp->member == NULL && tsp->ja3_ja4_raw != NULL &&		\
 	    ctx->sp != NULL)						\
@@ -516,10 +519,10 @@ name(const struct vrt_ctx *ctx)						\
 
 VTLS_VMOD_ACCESSOR(const SSL *, VTLS_tls_ctx, ssl)
 VTLS_VMOD_ACCESSOR(const char *, VTLS_ja3, ja3)
-VTLS_JA4_ACCESSOR(VTLS_ja4, ja4, VTLS_JA4_MAIN)
-VTLS_JA4_ACCESSOR(VTLS_ja4_r, ja4_r, VTLS_JA4_R)
-VTLS_JA4_ACCESSOR(VTLS_ja4_o, ja4_o, VTLS_JA4_O)
-VTLS_JA4_ACCESSOR(VTLS_ja4_ro, ja4_ro, VTLS_JA4_RO)
+VTLS_JA4_ACCESSOR(VTLS_ja4, ja4, VTLS_JA4_MAIN, cache_param->tls_ja4)
+VTLS_JA4_ACCESSOR(VTLS_ja4_r, ja4_r, VTLS_JA4_R, cache_param->tls_ja4_r)
+VTLS_JA4_ACCESSOR(VTLS_ja4_o, ja4_o, VTLS_JA4_O, cache_param->tls_ja4_o)
+VTLS_JA4_ACCESSOR(VTLS_ja4_ro, ja4_ro, VTLS_JA4_RO, cache_param->tls_ja4_ro)
 
 /*
  * This is the SSL_do_handshake/poll loop.

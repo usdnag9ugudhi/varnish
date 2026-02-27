@@ -115,11 +115,11 @@ struct vtls_options {
 };
 
 void
-VTLS_del_sess(struct pool *pp, struct vtls_sess **ptsp, struct sess *sp)
+VTLS_del_sess(struct vtls_sess **ptsp, struct sess *sp)
 {
 	struct vtls_sess *tsp;
 
-	CHECK_OBJ_NOTNULL(pp, POOL_MAGIC);
+	CHECK_OBJ_NOTNULL(sp->pool, POOL_MAGIC);
 	TAKE_OBJ_NOTNULL(tsp, ptsp, VTLS_SESS_MAGIC);
 
 	free(tsp->ja3);
@@ -655,7 +655,9 @@ vtls_msg_cb(int write_p, int version, int content_type, const void *buf,
 	(void)arg;
 	if (write_p != 0 || content_type != SSL3_RT_HANDSHAKE)
 		return;
-	if (!cache_param->tls_ja3 && !cache_param->tls_ja4)
+	if (!cache_param->tls_ja3 && !cache_param->tls_ja4 &&
+	    !cache_param->tls_ja4_r && !cache_param->tls_ja4_o &&
+	    !cache_param->tls_ja4_ro)
 		return;
 	sp = SSL_get_app_data(ssl);
 	if (sp == NULL)
@@ -718,11 +720,15 @@ vtls_clienthello_cb(SSL *ssl, int *al, void *priv)
 	if (cache_param->tls_ja3 && VTLS_fingerprint_get_ja3(ssl, sp, tsp) != 0)
 		return (SSL_CLIENT_HELLO_ERROR);
 
-	if (cache_param->tls_ja4 && VTLS_fingerprint_get_ja4(ssl, sp, tsp) != 0)
-		return (SSL_CLIENT_HELLO_ERROR);
-
-	/* Free raw Client Hello data after JA3/JA4 use */
-	VTLS_fingerprint_raw_free(&tsp->ja3_ja4_raw);
+	/*
+	 * JA4 variants are computed when VCL calls tls.ja4() etc., not here.
+	 * When any JA4 param is on, leave ja3_ja4_raw so those VMOD calls can
+	 * use it; it is freed when the session ends (VTLS_del_sess). Otherwise
+	 * free it now.
+	 */
+	if (!(cache_param->tls_ja4 || cache_param->tls_ja4_r ||
+	    cache_param->tls_ja4_o || cache_param->tls_ja4_ro))
+		VTLS_fingerprint_raw_free(&tsp->ja3_ja4_raw);
 
 	if (!SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_server_name,
 	    &ext, &l)) {

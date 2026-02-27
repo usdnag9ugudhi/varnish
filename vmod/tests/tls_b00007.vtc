@@ -31,6 +31,9 @@ varnish v1 -arg "-A ${tmpdir}/vtls.cfg" -vcl+backend {
 }
 
 varnish v1 -cli "param.set tls_ja4 on"
+varnish v1 -cli "param.set tls_ja4_r on"
+varnish v1 -cli "param.set tls_ja4_o on"
+varnish v1 -cli "param.set tls_ja4_ro on"
 varnish v1 -start
 
 # JA4 variants: ja4 (hashed sorted), ja4_r (raw sorted), ja4_o (hashed original), ja4_ro (raw original)

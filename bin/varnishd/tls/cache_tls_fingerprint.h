@@ -27,9 +27,6 @@ int VTLS_fingerprint_parse_clienthello(const unsigned char *buf, size_t len,
 /* Compute JA3 from tsp->ja3_ja4_raw into tsp->ja3. Returns 0 on success. */
 int VTLS_fingerprint_get_ja3(SSL *ssl, struct sess *sp, struct vtls_sess *tsp);
 
-/* Compute JA4 from tsp->ja3_ja4_raw into tsp->ja4, ja4_r, ja4_o, ja4_ro. Returns 0 on success. */
-int VTLS_fingerprint_get_ja4(SSL *ssl, struct sess *sp, struct vtls_sess *tsp);
-
 /* JA4 variant: compute only the requested one on first use. */
 enum vtls_ja4_variant {
 	VTLS_JA4_MAIN = 0,	/* ja4 (sorted, hashed) */
