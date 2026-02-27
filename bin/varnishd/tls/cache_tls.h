@@ -88,6 +88,7 @@ struct vtls_sess {
 	char			*ja4_r;		/* JA4 raw (sorted) fingerprint */
 	char			*ja4_o;		/* JA4 hashed original-order fingerprint */
 	char			*ja4_ro;		/* JA4 raw original-order fingerprint */
+	void			*ja3_ja4_raw;	/* Parsed raw Client Hello for JA3/JA4 (freed after use) */
 	struct vtls_buf		*buf;		/* TLS record buffer */
 	void			*priv_local;	/* Pointer to listen_sock->tls */
 };
